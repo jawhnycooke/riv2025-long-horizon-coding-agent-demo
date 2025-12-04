@@ -6,10 +6,10 @@ for Environment and IssueNumber.
 """
 
 import os
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+from typing import Any
 
-import boto3
+from .config import get_boto3_client
 
 
 class MetricsPublisher:
@@ -19,9 +19,11 @@ class MetricsPublisher:
 
     def __init__(
         self,
-        issue_number: Optional[int] = None,
-        session_id: Optional[str] = None,
+        issue_number: int | None = None,
+        session_id: str | None = None,
         enabled: bool = True,
+        profile: str | None = None,
+        region: str | None = None,
     ):
         """Initialize the metrics publisher.
 
@@ -29,23 +31,25 @@ class MetricsPublisher:
             issue_number: GitHub issue number for dimension filtering
             session_id: AgentCore session ID for dimension filtering
             enabled: Whether to actually publish metrics (can be disabled for local dev)
+            profile: AWS profile name (optional, falls back to AWS_PROFILE env var)
+            region: AWS region (optional, falls back to AWS_REGION env var)
         """
         self.issue_number = issue_number
         self.session_id = session_id
-        self.enabled = enabled and os.environ.get(
-            "CLOUDWATCH_METRICS_ENABLED", "true"
-        ).lower() == "true"
+        self.enabled = (
+            enabled
+            and os.environ.get("CLOUDWATCH_METRICS_ENABLED", "true").lower() == "true"
+        )
         self._total_commits = 0  # Track cumulative commits for the session
 
         if self.enabled:
-            region = os.environ.get("AWS_REGION", "us-west-2")
-            self.client = boto3.client("cloudwatch", region_name=region)
+            self.client = get_boto3_client("cloudwatch", profile=profile, region=region)
         else:
             self.client = None
 
-    def _get_dimensions(self):
+    def _get_dimensions(self) -> list[dict[str, str]]:
         """Get base dimensions for all metrics."""
-        dims = [
+        dims: list[dict[str, str]] = [
             {"Name": "Environment", "Value": os.environ.get("ENVIRONMENT", "reinvent")}
         ]
         if self.issue_number:
@@ -57,7 +61,7 @@ class MetricsPublisher:
         metric_name: str,
         value: float,
         unit: str = "Count",
-        extra_dims: Optional[list] = None,
+        extra_dims: list[dict[str, str]] | None = None,
     ) -> bool:
         """Publish a single metric to CloudWatch.
 
@@ -85,7 +89,7 @@ class MetricsPublisher:
                         "MetricName": metric_name,
                         "Value": value,
                         "Unit": unit,
-                        "Timestamp": datetime.now(timezone.utc),
+                        "Timestamp": datetime.now(UTC),
                         "Dimensions": dims,
                     }
                 ],
@@ -95,7 +99,7 @@ class MetricsPublisher:
             print(f"⚠️ CloudWatch metric error ({metric_name}): {e}")
             return False
 
-    def _put_metrics_batch(self, metrics: list) -> bool:
+    def _put_metrics_batch(self, metrics: list[dict[str, Any]]) -> bool:
         """Publish multiple metrics in a single API call.
 
         Args:
@@ -121,7 +125,7 @@ class MetricsPublisher:
                         "MetricName": m["name"],
                         "Value": m["value"],
                         "Unit": m.get("unit", "Count"),
-                        "Timestamp": datetime.now(timezone.utc),
+                        "Timestamp": datetime.now(UTC),
                         "Dimensions": dims,
                     }
                 )
@@ -149,12 +153,18 @@ class MetricsPublisher:
             [{"Name": "Mode", "Value": mode}],
         )
 
-    def publish_session_completed(self, exit_code: int, duration_seconds: float) -> bool:
+    def publish_session_completed(
+        self, exit_code: int, duration_seconds: float
+    ) -> bool:
         """Publish session completion with exit code and duration."""
         return self._put_metrics_batch(
             [
                 {"name": "SessionCompleted", "value": 1},
-                {"name": "SessionDuration", "value": duration_seconds, "unit": "Seconds"},
+                {
+                    "name": "SessionDuration",
+                    "value": duration_seconds,
+                    "unit": "Seconds",
+                },
                 {
                     "name": "SessionExitCode",
                     "value": exit_code,
@@ -181,9 +191,12 @@ class MetricsPublisher:
                         "MetricName": "SessionHeartbeat",
                         "Value": 1,
                         "Unit": "Count",
-                        "Timestamp": datetime.now(timezone.utc),
+                        "Timestamp": datetime.now(UTC),
                         "Dimensions": [
-                            {"Name": "Environment", "Value": os.environ.get("ENVIRONMENT", "reinvent")}
+                            {
+                                "Name": "Environment",
+                                "Value": os.environ.get("ENVIRONMENT", "reinvent"),
+                            }
                         ],
                     }
                 ],

@@ -24,3 +24,7 @@ aws-opentelemetry-distro>=0.13.0
 
 # Documentation - architecture diagrams
 diagrams>=0.23.0
+
+# CLI installer - interactive prompts and rich output
+questionary>=2.0.0
+rich>=13.0.0

@@ -1,4 +1,5 @@
 # #!/usr/bin/env python3
+
 """Claude Code Multi-Project Implementation.
 
 A modular, clean implementation of Claude Code with proper separation of concerns.
@@ -11,7 +12,7 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, tool
 from claude_agent_sdk.types import (
@@ -32,12 +33,26 @@ from src import (
     LoggingManager,
     SessionManager,
     TokenTracker,
+    __version__,
+)
+from src.session_manager import parse_build_plan_version
+from src.config import (
+    ProjectConfig,
+    Provider,
+    apply_provider_config,
+    load_project_config,
 )
 from src.security import SecurityValidator
+from src.tracing import (
+    TracingManager,
+    get_tracing_manager,
+    initialize_tracing,
+)
+
 
 # Global state
-PROJECT_ROOT: Optional[str] = None
-SESSION_ID: Optional[str] = None
+PROJECT_ROOT: str | None = None
+SESSION_ID: str | None = None
 
 # Constants
 COMPLETION_CONFIRMATIONS_REQUIRED = 1
@@ -67,7 +82,7 @@ COMPLETION_MARKERS = {
 COMPLETION_EXCLUSIONS = ["unfinished", "issues"]
 
 
-def load_example_test(current_dir: str, project_name: Optional[str]) -> str:
+def load_example_test(current_dir: str, project_name: str | None) -> str:
     """Load example test description from project's EXAMPLE_TEST.txt file.
 
     Args:
@@ -146,7 +161,7 @@ def _detect_completion_signal(text: str) -> bool:
     return has_markers and not has_exclusions
 
 
-def _capture_session_id(message, current_session_id: Optional[str]) -> Optional[str]:
+def _capture_session_id(message, current_session_id: str | None) -> str | None:
     """Extract session ID from message if available."""
     if not isinstance(message, (SystemMessage, ResultMessage)):
         return current_session_id
@@ -174,7 +189,7 @@ def _process_text_block(block: TextBlock) -> tuple[bool, bool]:
 def _process_tool_block(block: ToolUseBlock | ToolResultBlock) -> None:
     """Process tool use or tool result blocks."""
     # Include issue number in logs for CloudWatch filtering
-    issue_num = os.environ.get('ISSUE_NUMBER', '')
+    issue_num = os.environ.get("ISSUE_NUMBER", "")
     issue_tag = f" [issue:{issue_num}]" if issue_num else ""
     if isinstance(block, ToolUseBlock):
         print(f"\n[Tool Call] {block.name}{issue_tag}")
@@ -232,7 +247,7 @@ def read_agent_state(generation_dir: Path) -> dict[str, Any]:
         # Validate state structure
         if "desired_state" not in state or "current_state" not in state:
             print(
-                f"⚠️ Warning: agent_state.json missing required fields, using default pause state"
+                "⚠️ Warning: agent_state.json missing required fields, using default pause state"
             )
             return {
                 "desired_state": "pause",
@@ -283,14 +298,22 @@ def read_agent_state(generation_dir: Path) -> dict[str, Any]:
 
 def write_agent_state(
     generation_dir: Path,
-    desired: Optional[str] = None,
-    current: Optional[str] = None,
-    note: Optional[str] = None,
+    desired: str | None = None,
+    current: str | None = None,
+    note: str | None = None,
+    build_plan_version: str | None = None,
 ) -> None:
     """Write agent state to agent_state.json.
 
     Updates only the fields provided. Preserves other fields.
     Always updates timestamp.
+
+    Args:
+        generation_dir: Path to the generation directory
+        desired: Desired state (continuous, run_once, run_cleanup, pause, terminated)
+        current: Current state (same options as desired)
+        note: Optional note explaining the state change
+        build_plan_version: Optional BUILD_PLAN.md version string
     """
     state_file = generation_dir / STATE_FILE_NAME
 
@@ -317,6 +340,9 @@ def write_agent_state(
     if note is not None:
         state["note"] = note
 
+    if build_plan_version is not None:
+        state["build_plan_version"] = build_plan_version
+
     # Always update timestamp and setBy
     state["timestamp"] = _get_utc_timestamp()
     state["setBy"] = "agent"
@@ -334,7 +360,7 @@ def write_agent_state(
 
 
 def update_agent_state(
-    generation_dir: Path, current: str, note: Optional[str] = None
+    generation_dir: Path, current: str, note: str | None = None
 ) -> None:
     """Convenience function to update only current_state.
 
@@ -350,6 +376,24 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Show version information and exit",
+    )
+
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate configuration and credentials without running the agent",
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Simulate agent execution: validate config, show prompts, log what would be executed without making API calls",
+    )
+
+    parser.add_argument(
         "--resume",
         type=str,
         help="[DEPRECATED] No longer needed - auto-resumes if output directory exists",
@@ -361,6 +405,14 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         help="Project name to use (e.g., 'twitter_clone'). Uses default prompts if not specified.",
         metavar="PROJECT_NAME",
+    )
+
+    parser.add_argument(
+        "--provider",
+        type=str,
+        choices=["anthropic", "bedrock"],
+        default=None,
+        help="Model provider: 'anthropic' (direct API) or 'bedrock' (AWS). Overrides .claude-code.json",
     )
 
     parser.add_argument(
@@ -446,6 +498,284 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+def show_version() -> None:
+    """Display version information and configuration details."""
+    print(f"claude-code-agent {__version__}")
+    print()
+
+    # Show config file path and contents
+    config_path = Path(".claude-code.json")
+    if config_path.exists():
+        print(f"Config: {config_path.absolute()}")
+        config = load_project_config()
+        if config:
+            print(f"Provider: {config.provider.value}")
+            print(f"Model: {config.model}")
+            if config.provider == Provider.BEDROCK:
+                print(f"Region: {config.bedrock_region or 'not set'}")
+                if config.bedrock_profile:
+                    print(f"Profile: {config.bedrock_profile}")
+    else:
+        print("Config: Not configured (run python install.py)")
+
+
+def validate_config(
+    project: str | None = None,
+    provider_override: str | None = None,
+) -> bool:
+    """Validate configuration and credentials.
+
+    Args:
+        project: Optional project name to validate BUILD_PLAN.md
+        provider_override: Optional provider to use instead of config file value
+
+    Returns:
+        True if all validations pass, False otherwise.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    print("Validating configuration...")
+    print()
+
+    # 1. Check .claude-code.json
+    config_path = Path(".claude-code.json")
+    if not config_path.exists():
+        errors.append("Missing .claude-code.json - run 'python install.py' to create")
+    else:
+        config = load_project_config()
+        if not config:
+            errors.append(".claude-code.json exists but could not be parsed")
+        else:
+            # Apply provider override if specified
+            effective_provider = (
+                Provider(provider_override) if provider_override else config.provider
+            )
+            provider_source = "(from --provider)" if provider_override else ""
+
+            print(f"✅ Config file: {config_path}")
+            print(f"   Provider: {effective_provider.value} {provider_source}")
+            print(f"   Model: {config.model}")
+
+            # 2. Validate credentials based on effective provider
+            if effective_provider == Provider.ANTHROPIC:
+                api_key = (
+                    os.environ.get(config.anthropic_api_key_env_var)
+                    or config.anthropic_api_key
+                )
+                if api_key:
+                    # Mask the key for display
+                    masked = (
+                        f"{api_key[:8]}...{api_key[-4:]}"
+                        if len(api_key) > 12
+                        else "****"
+                    )
+                    print(f"✅ Anthropic API key: {masked}")
+                else:
+                    errors.append(
+                        f"Missing Anthropic API key - set {config.anthropic_api_key_env_var} "
+                        "environment variable or add to config"
+                    )
+
+            elif effective_provider == Provider.BEDROCK:
+                # Check AWS credentials
+                try:
+                    import boto3
+
+                    profile = os.environ.get("AWS_PROFILE") or getattr(
+                        config, "bedrock_profile", None
+                    )
+                    session = boto3.Session(
+                        profile_name=profile, region_name=config.bedrock_region
+                    )
+                    sts = session.client("sts")
+                    identity = sts.get_caller_identity()
+                    account = identity.get("Account", "unknown")
+                    print(f"✅ AWS credentials: Account {account}")
+                    if profile:
+                        print(f"   Profile: {profile}")
+                    print(f"   Region: {config.bedrock_region}")
+                except ImportError:
+                    errors.append("boto3 not installed - required for Bedrock provider")
+                except Exception as e:
+                    errors.append(f"AWS credentials invalid: {e}")
+
+    # 3. Check BUILD_PLAN.md if project specified
+    if project:
+        build_plan_path = Path(f"prompts/{project}/BUILD_PLAN.md")
+        if build_plan_path.exists():
+            print(f"✅ Build plan: {build_plan_path}")
+        else:
+            errors.append(f"Missing {build_plan_path}")
+
+        # Also check for system prompt
+        system_prompt_path = Path("prompts/system_prompt.txt")
+        if system_prompt_path.exists():
+            print(f"✅ System prompt: {system_prompt_path}")
+        else:
+            warnings.append(f"Missing {system_prompt_path} (optional)")
+    else:
+        warnings.append("No --project specified, skipping BUILD_PLAN.md validation")
+
+    # Print summary
+    print()
+    if warnings:
+        for warning in warnings:
+            print(f"⚠️  {warning}")
+
+    if errors:
+        print()
+        for error in errors:
+            print(f"❌ {error}")
+        print()
+        print(f"Validation failed with {len(errors)} error(s)")
+        return False
+
+    print()
+    print("✅ All validations passed")
+    return True
+
+
+def dry_run_simulation(args: argparse.Namespace) -> bool:
+    """Simulate agent execution without making API calls.
+
+    Performs configuration validation and logs what would be executed,
+    including prompts, model settings, and session parameters.
+
+    Args:
+        args: Parsed command line arguments
+
+    Returns:
+        True if dry run passes (config valid), False otherwise.
+    """
+    print("=" * 60)
+    print("DRY RUN MODE - Simulating agent execution")
+    print("=" * 60)
+    print()
+
+    # 1. Run configuration validation
+    print("Step 1: Validating configuration")
+    print("-" * 40)
+    config_valid = validate_config(args.project, args.provider)
+    print()
+
+    if not config_valid:
+        print("❌ Dry run failed: Configuration validation failed")
+        return False
+
+    # 2. Load and display effective configuration
+    print("Step 2: Effective configuration")
+    print("-" * 40)
+    project_config = load_project_config()
+
+    effective_provider = Provider.ANTHROPIC
+    if args.provider:
+        effective_provider = Provider(args.provider)
+        print(f"Provider: {effective_provider.value} (from --provider flag)")
+    elif project_config:
+        effective_provider = project_config.provider
+        print(f"Provider: {effective_provider.value} (from config)")
+    else:
+        print(f"Provider: {effective_provider.value} (default)")
+
+    effective_model = args.model
+    if (
+        project_config
+        and args.model == DEFAULT_MODEL
+        and project_config.model != DEFAULT_MODEL
+    ):
+        effective_model = project_config.model
+        print(f"Model: {effective_model} (from config)")
+    else:
+        print(f"Model: {effective_model}")
+
+    if effective_provider == Provider.BEDROCK and project_config:
+        print(f"Region: {project_config.bedrock_region or 'us-east-1'}")
+        if project_config.bedrock_profile:
+            print(f"Profile: {project_config.bedrock_profile}")
+    print()
+
+    # 3. Display session parameters
+    print("Step 3: Session parameters")
+    print("-" * 40)
+    current_dir = os.environ.get("PROJECT_ROOT", os.getcwd())
+    print(f"Working directory: {current_dir}")
+    print(f"Project: {args.project or '(default)'}")
+    print(f"Frontend port: {args.frontend_port}")
+    print(f"Backend port: {args.backend_port}")
+
+    if args.cleanup_session:
+        print("Mode: Cleanup session")
+    elif args.enhance_feature:
+        print(f"Mode: Enhancement ({args.enhance_feature})")
+    else:
+        print("Mode: Standard build")
+
+    if args.start_paused:
+        print("Initial state: Paused")
+    else:
+        print("Initial state: Continuous")
+
+    output_dir = (
+        args.output_dir if args.output_dir else str(Path(current_dir) / "generated-app")
+    )
+    print(f"Output directory: {output_dir}")
+    print()
+
+    # 4. Display prompts summary
+    print("Step 4: Prompts configuration")
+    print("-" * 40)
+    try:
+        prompts_dir = SessionManager.get_project_prompts_dir(current_dir, args.project)
+        print(f"Prompts directory: {prompts_dir}")
+
+        # Check for key prompt files
+        build_plan_path = Path(prompts_dir) / "BUILD_PLAN.md"
+        if build_plan_path.exists():
+            version = parse_build_plan_version(build_plan_path)
+            if version:
+                print(f"BUILD_PLAN.md: Found (version {version})")
+            else:
+                print("BUILD_PLAN.md: Found (no version)")
+
+            # Show first few lines of BUILD_PLAN
+            content = build_plan_path.read_text(encoding="utf-8")
+            lines = content.split("\n")[:10]
+            preview = "\n".join(f"  > {line}" for line in lines if line.strip())
+            print(f"BUILD_PLAN preview:\n{preview}")
+        else:
+            print("BUILD_PLAN.md: Not found")
+
+        system_prompt_path = Path(current_dir) / "prompts" / "system_prompt.txt"
+        if system_prompt_path.exists():
+            content = system_prompt_path.read_text(encoding="utf-8")
+            word_count = len(content.split())
+            print(f"System prompt: Found ({word_count} words)")
+        else:
+            print("System prompt: Not found")
+
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ Prompts error: {e}")
+        return False
+    print()
+
+    # 5. Would-execute summary
+    print("Step 5: Execution plan (would execute)")
+    print("-" * 40)
+    print(f"✓ Initialize session in: {output_dir}")
+    print(f"✓ Copy prompts from: {prompts_dir}")
+    print(f"✓ Initialize git repository")
+    print(f"✓ Start Claude Agent SDK with model: {effective_model}")
+    print(f"✓ Run agent in {'cleanup' if args.cleanup_session else 'build'} mode")
+    print()
+
+    print("=" * 60)
+    print("✅ DRY RUN PASSED - Configuration valid")
+    print("   Run without --dry-run to execute agent")
+    print("=" * 60)
+    return True
 
 
 def load_build_plan_content(generation_dir: Path) -> str:
@@ -789,7 +1119,7 @@ def _handle_api_error(
     error: Exception,
     message_log_data: dict[str, Any],
     logging_manager: LoggingManager,
-    run_dir: Optional[Path],
+    run_dir: Path | None,
 ) -> tuple[bool, str]:
     """Handle API errors and return (should_terminate, error_type)."""
     error_str = str(error)
@@ -817,8 +1147,8 @@ async def log_agent_response(
     client: ClaudeSDKClient,
     token_tracker: TokenTracker,
     logging_manager: LoggingManager,
-    pause_flag: Optional[dict] = None,
-    run_dir: Optional[Path] = None,
+    pause_flag: dict | None = None,
+    run_dir: Path | None = None,
 ) -> str:
     """Log agent responses and update token tracking."""
     global SESSION_ID
@@ -925,7 +1255,7 @@ async def log_agent_response(
 async def handle_session_terminating_error(
     client: ClaudeSDKClient,
     logging_manager: LoggingManager,
-    run_dir: Optional[Path] = None,
+    run_dir: Path | None = None,
     error_type: str = "unknown",
 ) -> None:
     """Handle errors that require session termination by logging and raising exception."""
@@ -942,7 +1272,6 @@ async def handle_session_terminating_error(
 
     # Raise exception to terminate current session
     raise RuntimeError(f"Session terminated due to {error_type}")
-
 
 
 def _create_claude_client(
@@ -978,8 +1307,55 @@ def _create_claude_client(
             input_data, tool_use_id, context, project_root
         )
 
+    # Tracing hooks for OpenTelemetry integration
+    # Store active spans by tool_use_id for correlation
+    active_spans: dict[str, Any] = {}
+
+    async def tracing_pre_hook(input_data, tool_use_id=None, context=None):
+        """Start a tracing span before tool execution."""
+        tracing = get_tracing_manager()
+        if not tracing.is_enabled:
+            return input_data
+
+        tool_name = input_data.get("tool_name", "unknown")
+        tool_input = input_data.get("tool_input", {})
+
+        # Create a span context
+        tracer = tracing.trace_tool_call(tool_name, tool_input)
+        tracer.__enter__()
+
+        # Store for later completion
+        if tool_use_id:
+            active_spans[tool_use_id] = tracer
+
+        return input_data
+
+    async def tracing_post_hook(input_data, tool_use_id=None, context=None):
+        """End the tracing span after tool execution."""
+        if not tool_use_id or tool_use_id not in active_spans:
+            return input_data
+
+        tracer = active_spans.pop(tool_use_id)
+
+        # Check for error in result
+        tool_result = input_data.get("tool_result", {})
+        if isinstance(tool_result, dict):
+            is_error = tool_result.get("is_error", False)
+            content = tool_result.get("content", "")
+            if is_error:
+                error_msg = str(content)[:200] if content else "Unknown error"
+                tracer.set_error(error_msg)
+            else:
+                result_preview = str(content)[:200] if content else ""
+                tracer.set_success(result_preview)
+
+        tracer.__exit__(None, None, None)
+        return input_data
+
     # For Docker/AWS deployment: explicitly set CLI path if in containerized environment
-    cli_path = "/usr/local/bin/claude" if os.path.exists("/usr/local/bin/claude") else None
+    cli_path = (
+        "/usr/local/bin/claude" if os.path.exists("/usr/local/bin/claude") else None
+    )
 
     return ClaudeSDKClient(
         options=ClaudeAgentOptions(
@@ -1003,10 +1379,12 @@ def _create_claude_client(
                     HookMatcher(
                         matcher="*", hooks=[universal_path_security_hook_wrapper]
                     ),
+                    HookMatcher(matcher="*", hooks=[tracing_pre_hook]),
                 ],
                 "PostToolUse": [
                     HookMatcher(matcher="Bash", hooks=[cd_enforcement_hook_wrapper]),
                     HookMatcher(matcher="Read", hooks=[track_read_hook_wrapper]),
+                    HookMatcher(matcher="*", hooks=[tracing_post_hook]),
                 ],
             },
             max_turns=10000,
@@ -1048,7 +1426,7 @@ async def _run_cleanup_session(
             message = create_cleanup_session_message(generation_dir)
             query_type = "cleanup"
 
-            print(f"User: [Starting cleanup session with cleanup-specific prompt]")
+            print("User: [Starting cleanup session with cleanup-specific prompt]")
             logging_manager.log_user_query(generation_dir, message, query_type)
             await client.query(message)
 
@@ -1153,7 +1531,9 @@ async def _run_single_session(
                 args.frontend_port,
                 args.backend_port,
             )
-            print(f"User: [Enhancement mode - implementing feature from {feature_request_path}]")
+            print(
+                f"User: [Enhancement mode - implementing feature from {feature_request_path}]"
+            )
 
             # Mark as processed so continuation sessions don't re-read it
             # Only rename if it's not the explicit --enhance-feature arg (which might be reused)
@@ -1161,7 +1541,9 @@ async def _run_single_session(
                 try:
                     processed_path = feature_request_path.with_suffix(".md.processed")
                     feature_request_path.rename(processed_path)
-                    print(f"📝 Marked feature request as processed: {processed_path.name}")
+                    print(
+                        f"📝 Marked feature request as processed: {processed_path.name}"
+                    )
                 except OSError as e:
                     print(f"⚠️ Could not mark feature request as processed: {e}")
         elif is_first_session:
@@ -1645,8 +2027,13 @@ async def run_autonomous_implementation(
     print("[Agent will work autonomously with fresh context each loop]\n")
 
     await _handle_implementation_loop(
-        generation_dir, args, system_prompt, logging_manager, token_tracker, os.getcwd(),
-        is_existing_project=is_existing_project
+        generation_dir,
+        args,
+        system_prompt,
+        logging_manager,
+        token_tracker,
+        os.getcwd(),
+        is_existing_project=is_existing_project,
     )
 
     print(f"\nGeneration complete! Project saved at: {generation_dir}")
@@ -1659,9 +2046,79 @@ async def main() -> None:
     # Parse arguments
     args = parse_arguments()
 
+    # Handle --version flag
+    if args.version:
+        show_version()
+        return
+
+    # Handle --validate flag
+    if args.validate:
+        success = validate_config(args.project)
+        if not success:
+            raise SystemExit(1)
+        return
+
+    # Handle --dry-run flag
+    if args.dry_run:
+        success = dry_run_simulation(args)
+        if not success:
+            raise SystemExit(1)
+        return
+
+    # Load project configuration from .claude-code.json (if present)
+    # CLI arguments take precedence over config file
+    project_config = load_project_config()
+
+    # Determine effective provider (CLI > config > default)
+    effective_provider = Provider.ANTHROPIC  # default
+    if args.provider:
+        # CLI explicitly set provider
+        effective_provider = Provider(args.provider)
+        builtins.print(
+            f"📋 Provider: {effective_provider.value} (from --provider flag)"
+        )
+    elif project_config:
+        effective_provider = project_config.provider
+        builtins.print("📋 Loaded config from .claude-code.json")
+        builtins.print(f"   Provider: {effective_provider.value}")
+    else:
+        builtins.print("📋 No .claude-code.json found - using defaults (Anthropic API)")
+
+    # Apply provider configuration
+    if project_config:
+        # If CLI overrides provider, update the config
+        if args.provider:
+            project_config.provider = effective_provider
+        apply_provider_config(project_config)
+
+        # Use config model if --model wasn't explicitly specified
+        if args.model == DEFAULT_MODEL and project_config.model != DEFAULT_MODEL:
+            args.model = project_config.model
+            builtins.print(f"   Model: {args.model} (from config)")
+        else:
+            builtins.print(f"   Model: {args.model}")
+    elif args.provider == "bedrock":
+        # No config file but --provider bedrock was specified
+        # Create a minimal config for Bedrock
+        from src.config import DEFAULT_BEDROCK_REGION
+
+        temp_config = ProjectConfig(
+            provider=Provider.BEDROCK,
+            model=args.model,
+            bedrock_region=DEFAULT_BEDROCK_REGION,
+        )
+        apply_provider_config(temp_config)
+        builtins.print(f"   Region: {DEFAULT_BEDROCK_REGION} (default)")
+        builtins.print(f"   Model: {args.model}")
+
+    # Initialize OpenTelemetry tracing if configured
+    tracing_settings = project_config.tracing if project_config else None
+    if initialize_tracing(tracing_settings):
+        builtins.print("📊 OpenTelemetry tracing enabled")
+
     # Setup
     # Use PROJECT_ROOT environment variable if set (for Docker/AWS deployment)
-    current_dir = os.environ.get('PROJECT_ROOT', os.getcwd())
+    current_dir = os.environ.get("PROJECT_ROOT", os.getcwd())
 
     # Handle print-prompts command separately
     if args.print_prompts:
@@ -1672,10 +2129,14 @@ async def main() -> None:
     if args.enhance_feature:
         builtins.print(f"🔧 Enhancement mode: {args.enhance_feature}")
         if not Path(args.enhance_feature).exists():
-            builtins.print(f"❌ Error: Feature spec file not found: {args.enhance_feature}")
+            builtins.print(
+                f"❌ Error: Feature spec file not found: {args.enhance_feature}"
+            )
             return
         if args.existing_codebase and not Path(args.existing_codebase).exists():
-            builtins.print(f"❌ Error: Existing codebase not found: {args.existing_codebase}")
+            builtins.print(
+                f"❌ Error: Existing codebase not found: {args.existing_codebase}"
+            )
             return
         # Enhancement mode will be handled in the session setup below
 
@@ -1704,17 +2165,21 @@ async def main() -> None:
 
     # Determine output directory
     # Default to ./generated-app, can be overridden with --output-dir
-    output_dir = args.output_dir if args.output_dir else str(Path(current_dir) / "generated-app")
+    output_dir = (
+        args.output_dir if args.output_dir else str(Path(current_dir) / "generated-app")
+    )
     generation_dir = Path(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Check if this is an existing project (for resume vs fresh start)
-    is_existing_project = generation_dir.exists() and (generation_dir / "package.json").exists()
+    is_existing_project = (
+        generation_dir.exists() and (generation_dir / "package.json").exists()
+    )
 
     if is_existing_project:
         # Directory exists with code - automatic resume
         builtins.print(f"📁 Found existing project at: {generation_dir}")
-        builtins.print(f"📂 Resuming from previous work")
+        builtins.print("📂 Resuming from previous work")
     else:
         # Directory doesn't exist or is empty - create from template
         builtins.print(f"📁 Creating new project at: {generation_dir}")
@@ -1724,6 +2189,7 @@ async def main() -> None:
         template_dir = Path(current_dir) / "frontend-scaffold-template"
         if template_dir.exists():
             import shutil
+
             # Copy template contents (not the directory itself)
             for item in template_dir.iterdir():
                 dest = generation_dir / item.name
@@ -1770,6 +2236,13 @@ async def main() -> None:
     system_prompt = system_prompt_path.read_text(encoding="utf-8")
     build_plan_path = f"{prompts_dir_path}/BUILD_PLAN.md"
 
+    # Parse BUILD_PLAN.md version from YAML frontmatter
+    build_plan_version = parse_build_plan_version(Path(build_plan_path))
+    if build_plan_version:
+        print(f"📋 BUILD_PLAN.md version: {build_plan_version}")
+    else:
+        print("📋 BUILD_PLAN.md version: (not specified)")
+
     # Show custom ports if used
     if (
         args.frontend_port != DEFAULT_FRONTEND_PORT
@@ -1805,12 +2278,13 @@ async def main() -> None:
             initial_desired = "continuous"
             note = "Initial state created on startup"
 
-        # Create initial state file
+        # Create initial state file (include BUILD_PLAN version if available)
         write_agent_state(
             generation_dir,
             desired=initial_desired,
             current="pause",
             note=note,
+            build_plan_version=build_plan_version,
         )
         print(
             f"📝 Created initial agent_state.json with desired_state='{initial_desired}'"
@@ -1845,15 +2319,19 @@ async def main() -> None:
         # Handle Ctrl-C - update state to terminated and exit gracefully
         print("\n\n🛑 Ctrl-C detected - terminating agent gracefully...")
         update_agent_state(generation_dir, "terminated", "Agent terminated by Ctrl-C")
-        print(f"✅ Agent state updated to 'terminated'")
+        print("✅ Agent state updated to 'terminated'")
         print(f"📁 Project directory: {generation_dir}")
-        print("\nTo resume, just run the same command again - it auto-detects existing project.")
+        print(
+            "\nTo resume, just run the same command again - it auto-detects existing project."
+        )
     except RuntimeError as e:
         # Handle session-terminating errors
         error_str = str(e)
         if "Session terminated" in error_str:
             print(f"\n🚨 {error_str}")
-            print("\n🔄 To continue, just run the same command again - it auto-detects existing project.")
+            print(
+                "\n🔄 To continue, just run the same command again - it auto-detects existing project."
+            )
             print("   Progress is preserved in claude-progress.txt")
             print("   The next session will start with a clean context window")
         else:

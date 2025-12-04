@@ -1,9 +1,238 @@
 """Configuration constants and settings for Claude Code."""
 
+import json
+import os
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 from typing import Any
+
+
+class Provider(str, Enum):
+    """Supported model providers."""
+
+    ANTHROPIC = "anthropic"
+    BEDROCK = "bedrock"
+
 
 # Model defaults
 DEFAULT_MODEL = "claude-opus-4-5-20251101"
+DEFAULT_PROVIDER = Provider.ANTHROPIC
+
+# Bedrock region defaults
+DEFAULT_BEDROCK_REGION = "us-east-1"
+SUPPORTED_BEDROCK_REGIONS = [
+    "us-east-1",
+    "us-west-2",
+    "eu-west-1",
+    "ap-northeast-1",
+    "ap-southeast-2",
+]
+
+# Model ID mappings - Anthropic model IDs are used as canonical IDs
+# Bedrock uses the same IDs but requires CLAUDE_CODE_USE_BEDROCK=1 env var
+MODEL_DISPLAY_NAMES = {
+    "claude-opus-4-5-20251101": "Claude Opus 4.5",
+    "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+    "claude-haiku-4-5-20250927": "Claude Haiku 4.5",
+}
+
+
+@dataclass
+class RetrySettings:
+    """Retry configuration settings."""
+
+    max_retries: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 60.0
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RetrySettings":
+        """Create RetrySettings from dictionary."""
+        return cls(
+            max_retries=data.get("max_retries", 3),
+            base_delay=data.get("base_delay", 1.0),
+            max_delay=data.get("max_delay", 60.0),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "max_retries": self.max_retries,
+            "base_delay": self.base_delay,
+            "max_delay": self.max_delay,
+        }
+
+
+@dataclass
+class TracingSettings:
+    """OpenTelemetry tracing configuration settings."""
+
+    enabled: bool = False
+    service_name: str = "claude-code-agent"
+    exporter: str = "console"  # "console", "otlp", or "none"
+    otlp_endpoint: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TracingSettings":
+        """Create TracingSettings from dictionary."""
+        return cls(
+            enabled=data.get("enabled", False),
+            service_name=data.get("service_name", "claude-code-agent"),
+            exporter=data.get("exporter", "console"),
+            otlp_endpoint=data.get("otlp_endpoint"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        result: dict[str, Any] = {
+            "enabled": self.enabled,
+            "service_name": self.service_name,
+            "exporter": self.exporter,
+        }
+        if self.otlp_endpoint:
+            result["otlp_endpoint"] = self.otlp_endpoint
+        return result
+
+
+@dataclass
+class ProjectConfig:
+    """Project configuration loaded from .claude-code.json."""
+
+    provider: Provider
+    model: str
+    bedrock_region: str | None = None
+    bedrock_profile: str | None = None
+    bedrock_inference_profile: str | None = None
+    anthropic_api_key_env_var: str = "ANTHROPIC_API_KEY"
+    anthropic_api_key: str | None = None
+    retry: RetrySettings | None = None
+    tracing: TracingSettings | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProjectConfig":
+        """Create ProjectConfig from dictionary."""
+        provider_str = data.get("provider", DEFAULT_PROVIDER.value)
+        try:
+            provider = Provider(provider_str)
+        except ValueError:
+            provider = DEFAULT_PROVIDER
+
+        bedrock_config = data.get("bedrock", {})
+        anthropic_config = data.get("anthropic", {})
+        retry_config = data.get("retry", {})
+        tracing_config = data.get("tracing", {})
+
+        return cls(
+            provider=provider,
+            model=data.get("model", DEFAULT_MODEL),
+            bedrock_region=bedrock_config.get("region", DEFAULT_BEDROCK_REGION),
+            bedrock_profile=bedrock_config.get("profile"),
+            bedrock_inference_profile=bedrock_config.get("inference_profile"),
+            anthropic_api_key_env_var=anthropic_config.get(
+                "api_key_env_var", "ANTHROPIC_API_KEY"
+            ),
+            anthropic_api_key=anthropic_config.get("api_key"),
+            retry=RetrySettings.from_dict(retry_config) if retry_config else None,
+            tracing=TracingSettings.from_dict(tracing_config) if tracing_config else None,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        result: dict[str, Any] = {
+            "provider": self.provider.value,
+            "model": self.model,
+        }
+
+        if self.provider == Provider.BEDROCK or self.bedrock_region:
+            result["bedrock"] = {
+                "region": self.bedrock_region or DEFAULT_BEDROCK_REGION,
+                "profile": self.bedrock_profile,
+                "inference_profile": self.bedrock_inference_profile,
+            }
+
+        result["anthropic"] = {
+            "api_key_env_var": self.anthropic_api_key_env_var,
+        }
+        if self.anthropic_api_key:
+            result["anthropic"]["api_key"] = self.anthropic_api_key
+
+        if self.retry:
+            result["retry"] = self.retry.to_dict()
+
+        if self.tracing:
+            result["tracing"] = self.tracing.to_dict()
+
+        return result
+
+
+def load_project_config(config_path: Path | None = None) -> ProjectConfig | None:
+    """
+    Load project configuration from .claude-code.json.
+
+    Args:
+        config_path: Optional path to config file. Defaults to .claude-code.json in cwd.
+
+    Returns:
+        ProjectConfig if file exists and is valid, None otherwise.
+    """
+    if config_path is None:
+        config_path = Path.cwd() / ".claude-code.json"
+
+    if not config_path.exists():
+        return None
+
+    try:
+        with open(config_path) as f:
+            data = json.load(f)
+        return ProjectConfig.from_dict(data)
+    except (OSError, json.JSONDecodeError, KeyError) as e:
+        print(f"Warning: Failed to load config from {config_path}: {e}")
+        return None
+
+
+def get_provider_env_vars(config: ProjectConfig) -> dict[str, str]:
+    """
+    Get environment variables needed for the configured provider.
+
+    Args:
+        config: Project configuration
+
+    Returns:
+        Dictionary of environment variables to set
+    """
+    env_vars: dict[str, str] = {}
+
+    if config.provider == Provider.BEDROCK:
+        # Enable Bedrock mode in Claude SDK
+        env_vars["CLAUDE_CODE_USE_BEDROCK"] = "1"
+
+        # Set AWS region
+        if config.bedrock_region:
+            env_vars["AWS_REGION"] = config.bedrock_region
+
+    else:  # Anthropic
+        # Ensure Bedrock mode is disabled
+        env_vars["CLAUDE_CODE_USE_BEDROCK"] = "0"
+
+        # Set API key if provided directly in config
+        if config.anthropic_api_key:
+            env_vars["ANTHROPIC_API_KEY"] = config.anthropic_api_key
+
+    return env_vars
+
+
+def apply_provider_config(config: ProjectConfig) -> None:
+    """
+    Apply provider configuration to environment.
+
+    Args:
+        config: Project configuration to apply
+    """
+    env_vars = get_provider_env_vars(config)
+    for key, value in env_vars.items():
+        os.environ[key] = value
+
 
 # Port defaults
 DEFAULT_FRONTEND_PORT = 6174
@@ -87,25 +316,25 @@ ALLOWED_PKILL_PATTERNS = [
 # These regex patterns match sed commands that should be blocked
 BLOCKED_SED_PATTERNS = [
     # Block any sed command that modifies "passes" field in tests.json
-    r'sed.*passes.*tests\.json',
-    r'sed.*tests\.json.*passes',
+    r"sed.*passes.*tests\.json",
+    r"sed.*tests\.json.*passes",
     # Block bulk true/false replacements in tests.json
-    r'sed.*false.*true.*tests\.json',
-    r'sed.*true.*false.*tests\.json',
+    r"sed.*false.*true.*tests\.json",
+    r"sed.*true.*false.*tests\.json",
 ]
 
 # Block any bash command that could modify tests.json
 # Agent must use Edit tool with screenshot verification instead
 BLOCKED_TESTS_JSON_PATTERNS = [
-    r'awk.*tests\.json',
-    r'jq.*tests\.json',
-    r'python3?\s.*tests\.json',
-    r'node\s.*tests\.json',
-    r'echo.*>.*tests\.json',
-    r'cat.*>.*tests\.json',
-    r'printf.*>.*tests\.json',
-    r'tee.*tests\.json',
-    r'>.*tests\.json',  # Any redirection to tests.json
+    r"awk.*tests\.json",
+    r"jq.*tests\.json",
+    r"python3?\s.*tests\.json",
+    r"node\s.*tests\.json",
+    r"echo.*>.*tests\.json",
+    r"cat.*>.*tests\.json",
+    r"printf.*>.*tests\.json",
+    r"tee.*tests\.json",
+    r">.*tests\.json",  # Any redirection to tests.json
 ]
 
 
@@ -115,3 +344,56 @@ def get_default_template_vars() -> dict[str, Any]:
         "frontend_port": DEFAULT_FRONTEND_PORT,
         "backend_port": DEFAULT_BACKEND_PORT,
     }
+
+
+def get_boto3_session(
+    profile: str | None = None,
+    region: str | None = None,
+) -> Any:
+    """Create a boto3 session with optional profile and region.
+
+    Priority for profile:
+    1. Explicit profile parameter
+    2. AWS_PROFILE environment variable
+    3. None (use default credentials)
+
+    Priority for region:
+    1. Explicit region parameter
+    2. AWS_REGION environment variable
+    3. Default region (us-east-1)
+
+    Args:
+        profile: AWS profile name (optional)
+        region: AWS region (optional)
+
+    Returns:
+        Configured boto3.Session
+    """
+    import boto3
+
+    # Profile priority: explicit > env var > None
+    profile_name = profile or os.environ.get("AWS_PROFILE")
+
+    # Region priority: explicit > env var > default
+    region_name = region or os.environ.get("AWS_REGION", DEFAULT_BEDROCK_REGION)
+
+    return boto3.Session(profile_name=profile_name, region_name=region_name)
+
+
+def get_boto3_client(
+    service_name: str,
+    profile: str | None = None,
+    region: str | None = None,
+) -> Any:
+    """Create a boto3 client with optional profile and region.
+
+    Args:
+        service_name: AWS service name (e.g., 'cloudwatch', 'secretsmanager')
+        profile: AWS profile name (optional)
+        region: AWS region (optional)
+
+    Returns:
+        Configured boto3 client
+    """
+    session = get_boto3_session(profile=profile, region=region)
+    return session.client(service_name)

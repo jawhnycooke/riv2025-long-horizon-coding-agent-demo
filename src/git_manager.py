@@ -19,7 +19,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 
 # Constants
@@ -37,7 +37,7 @@ class GitHubConfig:
     repo: str  # owner/repo format
     issue_number: int
     token: str
-    branch: str = None  # Optional custom branch name (defaults to issue-N)
+    branch: str | None = None  # Optional custom branch name (defaults to issue-N)
 
     @property
     def branch_name(self) -> str:
@@ -67,7 +67,7 @@ class GitManager:
         self,
         work_dir: Path,
         mode: Literal["local", "github"] = "local",
-        github_config: Optional[GitHubConfig] = None,
+        github_config: GitHubConfig | None = None,
     ):
         """Initialize GitManager.
 
@@ -97,7 +97,7 @@ class GitManager:
     # Core Git Operations
     # =========================================================================
 
-    def configure_git_user(self, repo_path: Optional[Path] = None) -> None:
+    def configure_git_user(self, repo_path: Path | None = None) -> None:
         """Configure git user.name and user.email.
 
         Single source of truth for git user configuration.
@@ -118,7 +118,7 @@ class GitManager:
             capture_output=True,
         )
 
-    def is_inside_git_repo(self, path: Optional[Path] = None) -> bool:
+    def is_inside_git_repo(self, path: Path | None = None) -> bool:
         """Check if path is inside an existing git repository.
 
         Args:
@@ -158,7 +158,12 @@ class GitManager:
             subprocess.run(["git", "init"], cwd=self.work_dir)
             subprocess.run(["git", "add", "."], cwd=self.work_dir)
             subprocess.run(
-                ["git", "commit", "-m", "Initial template from frontend-scaffold-template"],
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    "Initial template from frontend-scaffold-template",
+                ],
                 cwd=self.work_dir,
             )
 
@@ -278,7 +283,7 @@ class GitManager:
             builtins.print(f"⚠️ Failed to write GitHub token file: {e}")
             return False
 
-    def install_post_commit_hook(self, repo_path: Optional[Path] = None) -> bool:
+    def install_post_commit_hook(self, repo_path: Path | None = None) -> bool:
         """Install post-commit hook for automatic pushing.
 
         The hook pushes immediately after each commit and writes the SHA
@@ -301,7 +306,7 @@ class GitManager:
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
         # Post-commit hook script
-        hook_script = f'''#!/bin/bash
+        hook_script = f"""#!/bin/bash
 # Git post-commit hook - pushes immediately after each commit
 # Installed by GitManager for event-driven push workflow
 
@@ -340,7 +345,7 @@ fi
 
 # Don't fail the commit if push fails
 exit 0
-'''
+"""
 
         try:
             hook_path.write_text(hook_script)
@@ -428,7 +433,7 @@ exit 0
 
         try:
             if os.path.exists(COMMITS_QUEUE_FILE):
-                with open(COMMITS_QUEUE_FILE, "r") as f:
+                with open(COMMITS_QUEUE_FILE) as f:
                     shas = [line.strip() for line in f if line.strip()]
 
                 # Clear the file
@@ -461,7 +466,9 @@ exit 0
                 capture_output=True,
                 text=True,
             )
-            head_sha = head_result.stdout.strip() if head_result.returncode == 0 else "unknown"
+            head_sha = (
+                head_result.stdout.strip() if head_result.returncode == 0 else "unknown"
+            )
             builtins.print(f"📊 Push check: HEAD is {head_sha[:12]}...")
 
             # Update origin URL with current token
@@ -500,7 +507,9 @@ exit 0
                 commit_count = int(result.stdout.strip())
                 if commit_count == 0:
                     return True, 0, []
-                builtins.print(f"📤 Remote branch doesn't exist yet, will push {commit_count} new commit(s)")
+                builtins.print(
+                    f"📤 Remote branch doesn't exist yet, will push {commit_count} new commit(s)"
+                )
             else:
                 commit_count = int(result.stdout.strip())
                 if commit_count == 0:
@@ -513,7 +522,11 @@ exit 0
                 capture_output=True,
                 text=True,
             )
-            pushed_shas = sha_result.stdout.strip().split("\n") if sha_result.returncode == 0 else []
+            pushed_shas = (
+                sha_result.stdout.strip().split("\n")
+                if sha_result.returncode == 0
+                else []
+            )
 
             # Push to origin
             result = subprocess.run(
@@ -524,7 +537,9 @@ exit 0
             )
 
             if result.returncode == 0:
-                builtins.print(f"✅ Push succeeded: {commit_count} commit(s) to {branch_name}")
+                builtins.print(
+                    f"✅ Push succeeded: {commit_count} commit(s) to {branch_name}"
+                )
                 return True, commit_count, pushed_shas
             else:
                 builtins.print(f"❌ Push FAILED to {branch_name}")
@@ -599,7 +614,9 @@ exit 0
         self._pending_notification_commits.clear()
         return pending
 
-    def should_send_notification(self, interval: int = DEFAULT_NOTIFICATION_INTERVAL) -> bool:
+    def should_send_notification(
+        self, interval: int = DEFAULT_NOTIFICATION_INTERVAL
+    ) -> bool:
         """Check if enough time has passed to send a notification batch.
 
         Args:

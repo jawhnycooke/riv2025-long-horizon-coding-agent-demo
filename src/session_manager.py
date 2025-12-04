@@ -2,9 +2,10 @@
 
 import builtins
 import os
+import re
 import shutil
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import (
     OPTIONAL_PROJECT_FILES,
@@ -13,11 +14,68 @@ from .config import (
 from .prompt_templates import PromptTemplater
 
 
+def parse_build_plan_version(build_plan_path: Path) -> str | None:
+    """Parse version from BUILD_PLAN.md YAML frontmatter.
+
+    The BUILD_PLAN.md file may contain YAML frontmatter at the top:
+
+    ---
+    version: "1.0.0"
+    ---
+
+    Args:
+        build_plan_path: Path to BUILD_PLAN.md file
+
+    Returns:
+        Version string if found, None otherwise
+    """
+    if not build_plan_path.exists():
+        return None
+
+    try:
+        content = build_plan_path.read_text(encoding="utf-8")
+
+        # Check for YAML frontmatter (starts with --- on first line)
+        if not content.startswith("---"):
+            return None
+
+        # Find the closing ---
+        lines = content.split("\n")
+        end_index = None
+        for i, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                end_index = i
+                break
+
+        if end_index is None:
+            return None
+
+        # Parse YAML frontmatter
+        frontmatter = "\n".join(lines[1:end_index])
+
+        # Simple regex-based parsing for version field
+        # Handles: version: "1.0.0" or version: 1.0.0 or version: '1.0.0'
+        version_match = re.search(
+            r'^version:\s*["\']?([^"\'\n]+)["\']?\s*$',
+            frontmatter,
+            re.MULTILINE,
+        )
+
+        if version_match:
+            return version_match.group(1).strip()
+
+        return None
+
+    except Exception as e:
+        builtins.print(f"⚠️ Error parsing BUILD_PLAN.md version: {e}")
+        return None
+
+
 class SessionManager:
     """Manages Claude Code session utilities."""
 
     @staticmethod
-    def get_project_prompts_dir(current_dir: str, project_name: Optional[str]) -> str:
+    def get_project_prompts_dir(current_dir: str, project_name: str | None) -> str:
         """Get the prompts directory for a project.
 
         Args:

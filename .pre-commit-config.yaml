@@ -1,0 +1,63 @@
+# Pre-commit hooks for claude-code-agent
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Black - code formatting
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3.11
+        exclude: ^(generated-app|\.venv)/
+
+  # Ruff - linting (replaces flake8, isort, and more)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        exclude: ^(generated-app|\.venv)/
+      - id: ruff-format
+        exclude: ^(generated-app|\.venv)/
+
+  # Mypy - type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - types-aiofiles>=23.0.0
+          - boto3-stubs[essential]>=1.28.0
+        exclude: ^(generated-app|\.venv|tests)/
+
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(generated-app|\.venv)/
+      - id: end-of-file-fixer
+        exclude: ^(generated-app|\.venv)/
+      - id: check-yaml
+        exclude: ^(generated-app|\.venv)/
+      - id: check-json
+        exclude: ^(generated-app|\.venv)/
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: debug-statements
+        exclude: ^(generated-app|\.venv)/
+
+# Configuration
+default_language_version:
+  python: python3.11
+
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+  autofix_prs: true
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: [mypy]  # mypy can be slow in CI, run separately

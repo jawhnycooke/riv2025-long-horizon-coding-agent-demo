@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import (
     MAX_API_CALLS,
@@ -57,12 +57,10 @@ class SessionTotals:
 class TokenTracker:
     """Tracks token usage and enforces limits."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.totals = SessionTotals()
 
-    def extract_usage_from_message(
-        self, message: dict[str, Any]
-    ) -> Optional[TokenUsage]:
+    def extract_usage_from_message(self, message: dict[str, Any]) -> TokenUsage | None:
         """Extract token usage from a ResultMessage."""
         if message.get("message_type") != "ResultMessage":
             return None
@@ -191,7 +189,7 @@ class TokenTracker:
                 f"⚠️ WARNING: Already at ${self.totals.total_cost_usd:.2f}/${MAX_COST_USD:.0f} cost ({percentage:.1f}%)"
             )
 
-    def print_current_usage(self, last_usage: Optional[TokenUsage] = None) -> None:
+    def print_current_usage(self, last_usage: TokenUsage | None = None) -> None:
         """Print current usage information."""
         if last_usage:
             print(
@@ -209,23 +207,23 @@ class TokenTracker:
     def check_limits(self) -> None:
         """Check if limits have been exceeded and exit if so."""
         if self.totals.output_tokens >= MAX_OUTPUT_TOKENS:
-            print(f"\n🚨 OUTPUT TOKEN LIMIT EXCEEDED!")
+            print("\n🚨 OUTPUT TOKEN LIMIT EXCEEDED!")
             print(
                 f"   Used: {self.totals.output_tokens:,}/{MAX_OUTPUT_TOKENS:,} tokens"
             )
-            print(f"   Terminating program to prevent excessive usage.")
+            print("   Terminating program to prevent excessive usage.")
             exit(1)
 
         if self.totals.api_calls >= MAX_API_CALLS:
-            print(f"\n🚨 API CALL LIMIT EXCEEDED!")
+            print("\n🚨 API CALL LIMIT EXCEEDED!")
             print(f"   Used: {self.totals.api_calls}/{MAX_API_CALLS} calls")
-            print(f"   Terminating program to prevent excessive usage.")
+            print("   Terminating program to prevent excessive usage.")
             exit(1)
 
         if self.totals.total_cost_usd >= MAX_COST_USD:
-            print(f"\n🚨 COST LIMIT EXCEEDED!")
+            print("\n🚨 COST LIMIT EXCEEDED!")
             print(f"   Used: ${self.totals.total_cost_usd:.2f}/${MAX_COST_USD:.0f}")
-            print(f"   Terminating program to prevent excessive costs.")
+            print("   Terminating program to prevent excessive costs.")
             exit(1)
 
         # Progressive warnings

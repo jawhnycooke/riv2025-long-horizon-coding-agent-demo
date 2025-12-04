@@ -1,0 +1,377 @@
+{
+  "_warning": "Feature definitions are IMMUTABLE. Only 'passes' and 'status' fields may be modified. IT IS CATASTROPHIC TO REMOVE OR EDIT FEATURE DEFINITIONS.",
+  "project": "Claude Code Agent Enhancements",
+  "created": "2025-12-03T00:00:00Z",
+  "lastUpdated": "2025-12-03T00:00:00Z",
+  "source": "Code Review Recommendations",
+  "features": [
+    {
+      "id": "F001",
+      "name": "Unit Test Infrastructure",
+      "description": "Add pytest test suite with fixtures for core modules (security.py, git_manager.py, config.py)",
+      "priority": "P0",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "pytest and pytest-cov added to requirements-dev.txt",
+        "tests/ directory created with conftest.py",
+        "test_security.py covers path validation hooks",
+        "test_git_manager.py covers git operations",
+        "test_config.py covers config loading and provider detection",
+        "All tests pass with `pytest -v`",
+        "Coverage report generated with >60% coverage"
+      ],
+      "subtasks": [
+        {"task": "Create tests/ directory structure", "status": "complete"},
+        {"task": "Add pytest dependencies to requirements", "status": "complete"},
+        {"task": "Write test_security.py", "status": "complete"},
+        {"task": "Write test_git_manager.py", "status": "pending"},
+        {"task": "Write test_config.py", "status": "complete"}
+      ],
+      "source": "Code Review#high-priority"
+    },
+    {
+      "id": "F002",
+      "name": "Type Safety with mypy",
+      "description": "Add mypy strict type checking and add type hints throughout codebase",
+      "priority": "P0",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "mypy added to requirements-dev.txt",
+        "pyproject.toml configured with mypy strict settings",
+        "All src/ modules pass mypy --strict",
+        "install.py passes mypy --strict",
+        "claude_code.py passes mypy --strict",
+        "bedrock_entrypoint.py passes mypy --strict"
+      ],
+      "subtasks": [
+        {"task": "Add mypy to requirements-dev.txt", "status": "complete"},
+        {"task": "Configure mypy in pyproject.toml", "status": "complete"},
+        {"task": "Add type hints to src/config.py", "status": "complete"},
+        {"task": "Add type hints to src/security.py", "status": "complete"},
+        {"task": "Add type hints to remaining src/ modules", "status": "complete"},
+        {"task": "Add type hints to entry points", "status": "pending"}
+      ],
+      "source": "Code Review#high-priority"
+    },
+    {
+      "id": "F003",
+      "name": "API Retry Logic",
+      "description": "Add exponential backoff retry logic for transient API and network failures in claude_code.py",
+      "priority": "P0",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Retry decorator or utility function created",
+        "Exponential backoff with jitter implemented",
+        "Max retries configurable (default: 3)",
+        "Transient errors (network, 429, 503) trigger retry",
+        "Non-transient errors (400, 401, 404) fail immediately",
+        "Retry attempts logged with backoff duration"
+      ],
+      "subtasks": [
+        {"task": "Create retry utility in src/", "status": "complete"},
+        {"task": "Integrate retry into claude_code.py agent loop", "status": "complete"},
+        {"task": "Add retry configuration to config", "status": "complete"},
+        {"task": "Write tests for retry logic", "status": "complete"}
+      ],
+      "source": "Code Review#high-priority"
+    },
+    {
+      "id": "F004",
+      "name": "Audit Trail Logging",
+      "description": "Log all bash commands executed by the agent to a separate audit file for security review",
+      "priority": "P0",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "audit.log file created in generation directory",
+        "All bash commands logged with timestamp",
+        "Command exit codes logged",
+        "Blocked commands logged with rejection reason",
+        "Audit log format is JSON-parseable",
+        "Audit log rotates or truncates to prevent unbounded growth"
+      ],
+      "subtasks": [
+        {"task": "Create audit logger in src/", "status": "complete"},
+        {"task": "Integrate audit logging into security hooks", "status": "complete"},
+        {"task": "Add log rotation/truncation", "status": "complete"},
+        {"task": "Document audit log format", "status": "complete"}
+      ],
+      "source": "Code Review#high-priority"
+    },
+    {
+      "id": "F005",
+      "name": "Wire AWS Profile to boto3",
+      "description": "Apply the AWS profile from .claude-code.json config to boto3 session creation",
+      "priority": "P1",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "AWS profile from config passed to boto3.Session()",
+        "Profile applied in bedrock_entrypoint.py",
+        "Profile applied in cloudwatch_metrics.py",
+        "Falls back to default if profile not in config",
+        "Works with AWS_PROFILE env var override"
+      ],
+      "subtasks": [
+        {"task": "Update src/config.py to expose profile", "status": "complete"},
+        {"task": "Update bedrock_entrypoint.py to use profile", "status": "complete"},
+        {"task": "Update cloudwatch_metrics.py to use profile", "status": "complete"},
+        {"task": "Test with multiple AWS profiles", "status": "complete"}
+      ],
+      "source": "Code Review#medium-priority"
+    },
+    {
+      "id": "F006",
+      "name": "Prompt Versioning",
+      "description": "Add version field to BUILD_PLAN.md for tracking and rollback capability",
+      "priority": "P1",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "BUILD_PLAN.md template includes version field in YAML frontmatter",
+        "Version parsed and logged at session start",
+        "Version included in agent_state.json",
+        "Version included in GitHub issue comments",
+        "Documentation explains versioning scheme"
+      ],
+      "subtasks": [
+        {"task": "Add version to canopy BUILD_PLAN.md", "status": "complete"},
+        {"task": "Parse version in session_manager.py", "status": "complete"},
+        {"task": "Include version in agent state and logs", "status": "complete"},
+        {"task": "Document versioning in CLAUDE.md", "status": "complete"}
+      ],
+      "source": "Code Review#medium-priority"
+    },
+    {
+      "id": "F007",
+      "name": "Session Lock Improvements",
+      "description": "Add jitter and timeout handling to prevent deadlocks in agent-builder workflow",
+      "priority": "P1",
+      "status": "pending",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Lock acquisition includes random jitter (0-5 seconds)",
+        "Lock has configurable timeout (default: 10 minutes)",
+        "Stale locks auto-released after timeout",
+        "Lock status queryable via GitHub Actions output",
+        "Deadlock recovery documented in runbook"
+      ],
+      "subtasks": [
+        {"task": "Add jitter to lock acquisition in workflow", "status": "pending"},
+        {"task": "Implement lock timeout mechanism", "status": "pending"},
+        {"task": "Add lock status output", "status": "pending"},
+        {"task": "Document recovery procedures", "status": "pending"}
+      ],
+      "source": "Code Review#medium-priority"
+    },
+    {
+      "id": "F008",
+      "name": "OpenTelemetry Tracing",
+      "description": "Enable distributed tracing for SDK tool calls using already-imported OpenTelemetry",
+      "priority": "P1",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "OpenTelemetry tracer configured in claude_code.py",
+        "Each tool call wrapped in a span",
+        "Spans include tool name, duration, success/failure",
+        "Traces exportable to console or OTLP endpoint",
+        "Tracing can be disabled via config/env var"
+      ],
+      "subtasks": [
+        {"task": "Configure OpenTelemetry tracer", "status": "complete"},
+        {"task": "Add tracing to tool call hooks", "status": "complete"},
+        {"task": "Add trace export configuration", "status": "complete"},
+        {"task": "Document tracing setup", "status": "complete"}
+      ],
+      "source": "Code Review#medium-priority"
+    },
+    {
+      "id": "F009",
+      "name": "Dry Run Mode",
+      "description": "Add --dry-run flag that simulates agent execution without AWS or actual file changes",
+      "priority": "P1",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "--dry-run flag added to claude_code.py argument parser",
+        "Dry run skips actual API calls",
+        "Dry run logs what would be executed",
+        "Dry run validates config and prompts",
+        "Exit code 0 if config valid, non-zero otherwise"
+      ],
+      "subtasks": [
+        {"task": "Add --dry-run argument", "status": "complete"},
+        {"task": "Implement dry run mode in agent loop", "status": "complete"},
+        {"task": "Add validation-only path", "status": "complete"},
+        {"task": "Document dry run usage", "status": "complete"}
+      ],
+      "source": "Code Review#medium-priority"
+    },
+    {
+      "id": "F010",
+      "name": "Issue Label Filtering",
+      "description": "Support --labels flag to filter which GitHub issues the agent picks up",
+      "priority": "P2",
+      "status": "pending",
+      "passes": false,
+      "acceptanceCriteria": [
+        "--labels flag added to argument parser",
+        "Multiple labels supported (comma-separated)",
+        "Issues without matching labels are skipped",
+        "Label filter works with issue-poller workflow",
+        "Default behavior unchanged when no labels specified"
+      ],
+      "subtasks": [
+        {"task": "Add --labels argument", "status": "pending"},
+        {"task": "Update github_integration.py to filter by labels", "status": "pending"},
+        {"task": "Update issue-poller workflow", "status": "pending"},
+        {"task": "Document label filtering", "status": "pending"}
+      ],
+      "source": "Code Review#nice-to-have"
+    },
+    {
+      "id": "F011",
+      "name": "Improved Security Hook Messages",
+      "description": "Make security hook rejection messages explain why the action was blocked",
+      "priority": "P2",
+      "status": "pending",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Path validation errors include attempted path and allowed root",
+        "Bash command errors include blocked command and reason",
+        "Test modification errors explain verification requirements",
+        "Error messages are actionable (suggest fix)",
+        "Errors logged to audit trail"
+      ],
+      "subtasks": [
+        {"task": "Improve path validation error messages", "status": "pending"},
+        {"task": "Improve bash command error messages", "status": "pending"},
+        {"task": "Improve test verification error messages", "status": "pending"},
+        {"task": "Add suggestions for common errors", "status": "pending"}
+      ],
+      "source": "Code Review#nice-to-have"
+    },
+    {
+      "id": "F012",
+      "name": "Architecture Documentation",
+      "description": "Add architecture diagram and workflow visualization to README",
+      "priority": "P2",
+      "status": "pending",
+      "passes": false,
+      "acceptanceCriteria": [
+        "ASCII or Mermaid diagram showing component relationships",
+        "Workflow diagram showing issue-to-deployment flow",
+        "Security model explained with diagram",
+        "Session state machine documented visually",
+        "Diagrams render correctly on GitHub"
+      ],
+      "subtasks": [
+        {"task": "Create component architecture diagram", "status": "pending"},
+        {"task": "Create workflow diagram", "status": "pending"},
+        {"task": "Add diagrams to README.md", "status": "pending"},
+        {"task": "Verify GitHub rendering", "status": "pending"}
+      ],
+      "source": "Code Review#nice-to-have"
+    },
+    {
+      "id": "F013",
+      "name": "Pre-commit Hooks",
+      "description": "Add pre-commit hooks for black, ruff, and mypy to enforce code quality",
+      "priority": "P2",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        ".pre-commit-config.yaml created",
+        "black formatting hook configured",
+        "ruff linting hook configured",
+        "mypy type checking hook configured",
+        "pre-commit install instructions in README",
+        "CI runs pre-commit checks"
+      ],
+      "subtasks": [
+        {"task": "Create .pre-commit-config.yaml", "status": "complete"},
+        {"task": "Add pre-commit to requirements-dev.txt", "status": "complete"},
+        {"task": "Configure hooks for black, ruff, mypy", "status": "complete"},
+        {"task": "Update README with setup instructions", "status": "pending"}
+      ],
+      "source": "Code Review#nice-to-have"
+    },
+    {
+      "id": "F014",
+      "name": "Validate Flag",
+      "description": "Add --validate flag to verify BUILD_PLAN.md exists and config is valid without running",
+      "priority": "P2",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "--validate flag added to argument parser",
+        "Validates .claude-code.json exists and is valid JSON",
+        "Validates BUILD_PLAN.md exists for specified project",
+        "Validates AWS credentials if Bedrock provider",
+        "Validates ANTHROPIC_API_KEY if Anthropic provider",
+        "Prints validation summary and exits"
+      ],
+      "subtasks": [
+        {"task": "Add --validate argument", "status": "complete"},
+        {"task": "Implement config validation", "status": "complete"},
+        {"task": "Implement credential validation", "status": "complete"},
+        {"task": "Add validation summary output", "status": "complete"}
+      ],
+      "source": "Code Review#quick-wins"
+    },
+    {
+      "id": "F015",
+      "name": "Configurable Completion Signal",
+      "description": "Make the completion signal configurable instead of hardcoded",
+      "priority": "P2",
+      "status": "pending",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Completion signal configurable in .claude-code.json",
+        "Default remains current emoji string",
+        "Signal can be plain text or include emoji",
+        "Signal documented in CLAUDE.md",
+        "bedrock_entrypoint.py reads signal from config"
+      ],
+      "subtasks": [
+        {"task": "Add completion_signal to config schema", "status": "pending"},
+        {"task": "Update claude_code.py to use config signal", "status": "pending"},
+        {"task": "Update bedrock_entrypoint.py", "status": "pending"},
+        {"task": "Document in CLAUDE.md", "status": "pending"}
+      ],
+      "source": "Code Review#quick-wins"
+    },
+    {
+      "id": "F016",
+      "name": "Version Flag",
+      "description": "Add --version flag to show installed version and config path",
+      "priority": "P2",
+      "status": "complete",
+      "passes": true,
+      "acceptanceCriteria": [
+        "--version flag added to argument parser",
+        "Shows package version from __init__.py or pyproject.toml",
+        "Shows path to .claude-code.json if exists",
+        "Shows current provider and model from config",
+        "Follows standard --version output format"
+      ],
+      "subtasks": [
+        {"task": "Add version to src/__init__.py", "status": "complete"},
+        {"task": "Add --version argument", "status": "complete"},
+        {"task": "Implement version output with config info", "status": "complete"}
+      ],
+      "source": "Code Review#quick-wins"
+    }
+  ],
+  "metrics": {
+    "total": 16,
+    "verified": 11,
+    "inProgress": 0,
+    "pending": 5,
+    "percentComplete": 68.75
+  }
+}

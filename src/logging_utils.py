@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, TextIO
 
 from .config import LOGS_DIR_NAME
 
@@ -13,16 +13,16 @@ from .config import LOGS_DIR_NAME
 class LoggingManager:
     """Manages logging functionality for Claude Code sessions."""
 
-    def __init__(self, log_file: Optional[TextIO] = None):
+    def __init__(self, log_file: TextIO | None = None):
         self.log_file = log_file
-        self.session_id: Optional[str] = None
+        self.session_id: str | None = None
 
     def setup_timestamped_print(self, log_file_path: Path) -> None:
         """Set up timestamped printing to both console and log file."""
         self.log_file = open(log_file_path, "a", encoding="utf-8")
         original_print = builtins.print
 
-        def timestamped_print(*args, **kwargs):
+        def timestamped_print(*args: Any, **kwargs: Any) -> None:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             timestamped_args = (f"[{timestamp}]", *args)
             original_print(*timestamped_args, **kwargs)  # Print to terminal

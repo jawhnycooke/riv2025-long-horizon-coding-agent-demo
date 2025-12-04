@@ -2,11 +2,11 @@
 
 import glob
 import os
-from pathlib import Path
-from typing import Any, Optional
-
 import re
+from pathlib import Path
+from typing import Any
 
+from .audit import get_audit_logger
 from .config import (
     ALLOWED_BASH_COMMANDS,
     ALLOWED_NODE_PATTERNS,
@@ -33,10 +33,10 @@ def track_screenshot_read(file_path: str) -> None:
     Args:
         file_path: Path to the screenshot/console file that was read
     """
-    if 'screenshots/' in file_path:
-        if file_path.endswith('.png') or file_path.endswith('-console.txt'):
+    if "screenshots/" in file_path:
+        if file_path.endswith(".png") or file_path.endswith("-console.txt"):
             _viewed_screenshots.add(file_path)
-            file_type = "screenshot" if file_path.endswith('.png') else "console log"
+            file_type = "screenshot" if file_path.endswith(".png") else "console log"
             print(f"📸 Tracked {file_type} view: {file_path}")
 
 
@@ -57,7 +57,7 @@ def clear_screenshot_tracking() -> None:
     _viewed_screenshots.clear()
 
 
-def _extract_test_id(old_string: str, new_string: str) -> Optional[str]:
+def _extract_test_id(old_string: str, new_string: str) -> str | None:
     """Extract test ID from the edit context.
 
     Looks for patterns like:
@@ -84,7 +84,7 @@ def _extract_test_id(old_string: str, new_string: str) -> Optional[str]:
     if name_match:
         name = name_match.group(1)
         # Convert to slug: "First Time User" -> "first-time-user"
-        slug = re.sub(r'[^a-zA-Z0-9]+', '-', name.lower()).strip('-')
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower()).strip("-")
         return slug
 
     return None
@@ -113,7 +113,7 @@ class SecurityValidator:
 
     @staticmethod
     def _validate_path_within_run_directory(
-        file_path: str, project_root: Optional[str]
+        file_path: str, project_root: str | None
     ) -> tuple[bool, str]:
         """Validate that a path is within the run-specific directory.
 
@@ -147,9 +147,7 @@ class SecurityValidator:
             return False, f"Error validating path: {e}"
 
     @staticmethod
-    def _validate_bash_paths(
-        command: str, project_root: str
-    ) -> Optional[dict[str, Any]]:
+    def _validate_bash_paths(command: str, project_root: str) -> dict[str, Any] | None:
         """Validate paths in bash commands to ensure they stay within the run directory.
 
         Args:
@@ -240,8 +238,7 @@ class SecurityValidator:
                 or token.startswith("/")
                 or
                 # Also check for common file patterns
-                "." in token
-                and len(token.split(".")) <= 3
+                ("." in token and len(token.split(".")) <= 3)
             ):  # Basic file extension check
                 potential_paths.append(token)
 
@@ -274,6 +271,12 @@ class SecurityValidator:
             if not is_valid:
                 print(f"🚨 BLOCKED Bash command: {error_reason}")
                 print(f"   Command: {command}")
+                # Audit log blocked path access
+                get_audit_logger().log_bash_command(
+                    command,
+                    blocked=True,
+                    reason=f"Restricted path: {error_reason}",
+                )
                 return {
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
@@ -287,9 +290,9 @@ class SecurityValidator:
     @staticmethod
     async def bash_security_hook(
         input_data: dict[str, Any],
-        tool_use_id: Optional[str] = None,
-        context: Optional[Any] = None,
-        project_root: Optional[str] = None,
+        tool_use_id: str | None = None,
+        context: Any | None = None,
+        project_root: str | None = None,
     ) -> dict[str, Any]:
         """Security hook to restrict Bash commands to only allowed ones.
 
@@ -348,7 +351,10 @@ class SecurityValidator:
         if first_word == "git":
             tokens = command.strip().split()
             if len(tokens) >= 2 and tokens[1] == "init":
-                print(f"🚨 BLOCKED: git init - use the existing repository")
+                print("🚨 BLOCKED: git init - use the existing repository")
+                get_audit_logger().log_bash_command(
+                    command, blocked=True, reason="git init not allowed"
+                )
                 return {
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
@@ -360,9 +366,17 @@ class SecurityValidator:
         # Check if command is in allowed list
         if first_word in ALLOWED_BASH_COMMANDS:
             print(f"✅ Allowed: {first_word}")
+            # Audit log allowed command (exit code will be updated post-execution)
+            get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
             print(f"🚨 BLOCKED: {command}")
+            # Audit log blocked command
+            get_audit_logger().log_bash_command(
+                command,
+                blocked=True,
+                reason=f"Command '{first_word}' not in allowed list",
+            )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -374,9 +388,9 @@ class SecurityValidator:
     @staticmethod
     async def universal_path_security_hook(
         input_data: dict[str, Any],
-        tool_use_id: Optional[str] = None,
-        context: Optional[Any] = None,
-        project_root: Optional[str] = None,
+        tool_use_id: str | None = None,
+        context: Any | None = None,
+        project_root: str | None = None,
     ) -> dict[str, Any]:
         """Universal security hook to restrict all operations to the run-specific directory.
 
@@ -431,6 +445,13 @@ class SecurityValidator:
 
         if not is_valid:
             print(f"🚨 BLOCKED {tool_name}: {error_reason}")
+            # Audit log blocked file operation
+            operation = "read" if tool_name == "Read" else "write"
+            if tool_name == "Edit":
+                operation = "edit"
+            get_audit_logger().log_file_operation(
+                operation, file_path, blocked=True, reason=error_reason
+            )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -441,11 +462,23 @@ class SecurityValidator:
 
         # Additional validation for Edit/Write operations on tests.json
         if tool_name in ["Edit", "Write", "MultiEdit"]:
-            test_validation_result = SecurityValidator._validate_test_result_modification(
-                tool_input, project_root
+            test_validation_result = (
+                SecurityValidator._validate_test_result_modification(
+                    tool_input, project_root
+                )
             )
             if test_validation_result:
+                # Audit log blocked test modification
+                get_audit_logger().log_file_operation(
+                    "edit", file_path, blocked=True, reason="Test result modification blocked"
+                )
                 return test_validation_result
+
+        # Audit log allowed file operation
+        operation = "read" if tool_name == "Read" else "write"
+        if tool_name == "Edit":
+            operation = "edit"
+        get_audit_logger().log_file_operation(operation, file_path, blocked=False)
 
         print(f"✅ Allowed {tool_name}: {file_path}")
         return {}
@@ -462,10 +495,14 @@ class SecurityValidator:
         """
         if command.strip() in ALLOWED_RM_COMMANDS:
             print(f"✅ Allowed: {command} (cleaning node_modules)")
+            get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
             print(f"🚨 BLOCKED: {command}")
             print("   rm command only allowed for 'rm -rf node_modules'")
+            get_audit_logger().log_bash_command(
+                command, blocked=True, reason="rm only allowed for 'rm -rf node_modules'"
+            )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -486,10 +523,14 @@ class SecurityValidator:
         """
         if any(pattern in command for pattern in ALLOWED_NODE_PATTERNS):
             print(f"✅ Allowed: {command}")
+            get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
             print(f"🚨 BLOCKED: {command}")
             print("   Node can only be used to run server.js or server/index.js")
+            get_audit_logger().log_bash_command(
+                command, blocked=True, reason="Node only allowed for server.js"
+            )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -510,11 +551,15 @@ class SecurityValidator:
         """
         if command.strip() in ALLOWED_PKILL_PATTERNS:
             print(f"✅ Allowed: {command}")
+            get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
             print(f"🚨 BLOCKED: {command}")
             print(
                 f"   pkill can only be used with specific patterns: {', '.join(ALLOWED_PKILL_PATTERNS)}"
+            )
+            get_audit_logger().log_bash_command(
+                command, blocked=True, reason="pkill not in allowed patterns"
             )
             return {
                 "hookSpecificOutput": {
@@ -542,7 +587,12 @@ class SecurityValidator:
             if re.search(pattern, command, re.IGNORECASE):
                 print(f"🚨 BLOCKED: {command}")
                 print("   sed cannot be used to bulk-modify test results in tests.json")
-                print("   Each test must be verified individually before marking as passed")
+                print(
+                    "   Each test must be verified individually before marking as passed"
+                )
+                get_audit_logger().log_bash_command(
+                    command, blocked=True, reason="sed bulk-modify tests.json blocked"
+                )
                 return {
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
@@ -561,9 +611,9 @@ class SecurityValidator:
     @staticmethod
     async def cd_enforcement_hook(
         input_data: dict[str, Any],
-        tool_use_id: Optional[str] = None,
-        context: Optional[Any] = None,
-        project_root: Optional[str] = None,
+        tool_use_id: str | None = None,
+        context: Any | None = None,
+        project_root: str | None = None,
     ) -> dict[str, Any]:
         """PostToolUse hook to enforce directory boundaries after cd commands.
 
@@ -590,10 +640,10 @@ class SecurityValidator:
 
                 # Check if we've escaped the project root
                 if not current_dir.startswith(project_root):
-                    print(f"⚠️ Directory escape detected!")
+                    print("⚠️ Directory escape detected!")
                     print(f"   Current dir: {current_dir}")
                     print(f"   Project root: {project_root}")
-                    print(f"   Resetting to project root...")
+                    print("   Resetting to project root...")
 
                     # Reset to project root
                     os.chdir(project_root)
@@ -621,6 +671,9 @@ class SecurityValidator:
             if re.search(pattern, command, re.IGNORECASE):
                 print(f"🚨 BLOCKED: {command}")
                 print("   Cannot use bash commands to modify tests.json")
+                get_audit_logger().log_bash_command(
+                    command, blocked=True, reason="bash modify tests.json blocked"
+                )
                 return _deny_response(
                     "Cannot use bash commands to modify tests.json. "
                     "You must use the Edit tool to update test results after taking "
@@ -631,8 +684,8 @@ class SecurityValidator:
     @staticmethod
     def _validate_test_result_modification(
         tool_input: dict[str, Any],
-        project_root: Optional[str],
-    ) -> Optional[dict[str, Any]]:
+        project_root: str | None,
+    ) -> dict[str, Any] | None:
         """Validate that screenshot AND console check exist and were viewed before marking test as passing.
 
         This prevents the agent from claiming tests pass without actually running
@@ -669,7 +722,7 @@ class SecurityValidator:
         test_id = _extract_test_id(old_string, new_string)
 
         if not test_id:
-            print(f"🚨 BLOCKED: Cannot determine test ID from edit context")
+            print("🚨 BLOCKED: Cannot determine test ID from edit context")
             return _deny_response(
                 "Cannot determine which test you are trying to mark as passing. "
                 "Ensure the edit context includes the test 'id' or 'name' field. "
@@ -681,13 +734,15 @@ class SecurityValidator:
 
         # Check if project_root is set
         if not project_root:
-            print(f"⚠️ WARNING: No project_root set, cannot validate screenshots")
+            print("⚠️ WARNING: No project_root set, cannot validate screenshots")
             return None  # Can't validate without project root
 
         # =====================================================================
         # Check 1: Screenshot must exist
         # =====================================================================
-        screenshot_pattern = f"{project_root}/screenshots/issue-{issue_number}/{test_id}-*.png"
+        screenshot_pattern = (
+            f"{project_root}/screenshots/issue-{issue_number}/{test_id}-*.png"
+        )
         screenshots = glob.glob(screenshot_pattern)
 
         if not screenshots:
@@ -721,7 +776,9 @@ class SecurityValidator:
         # =====================================================================
         # Check 3: Console log file must exist
         # =====================================================================
-        console_pattern = f"{project_root}/screenshots/issue-{issue_number}/{test_id}-console.txt"
+        console_pattern = (
+            f"{project_root}/screenshots/issue-{issue_number}/{test_id}-console.txt"
+        )
         console_files = glob.glob(console_pattern)
 
         if not console_files:
@@ -753,15 +810,17 @@ class SecurityValidator:
                 f"The console log should show 'NO_CONSOLE_ERRORS' for the test to pass."
             )
 
-        print(f"✅ Test '{test_id}' verified: screenshot and console log exist and were viewed")
+        print(
+            f"✅ Test '{test_id}' verified: screenshot and console log exist and were viewed"
+        )
         return None  # Allow the edit
 
     @staticmethod
     async def track_read_hook(
         input_data: dict[str, Any],
-        tool_use_id: Optional[str] = None,
-        context: Optional[Any] = None,
-        project_root: Optional[str] = None,
+        tool_use_id: str | None = None,
+        context: Any | None = None,
+        project_root: str | None = None,
     ) -> dict[str, Any]:
         """PostToolUse hook to track when screenshots are read.
 

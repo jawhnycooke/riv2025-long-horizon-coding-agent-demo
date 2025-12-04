@@ -1,3 +1,7 @@
+---
+version: "1.0.0"
+---
+
 <project_specification>
   <project_name>Canopy - Full Featured Project Management Application</project_name>
 

@@ -9,9 +9,9 @@ Handles:
 """
 
 import os
-from datetime import datetime
-from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from github import Github, GithubException
 from github.Issue import Issue
@@ -33,16 +33,17 @@ LABEL_REBUILDING = "rebuilding"
 @dataclass
 class BuildableIssue:
     """Represents an issue approved for building"""
+
     number: int
     title: str
     body: str
-    labels: List[str]
+    labels: list[str]
     thumbs_up_count: int
     has_staff_approval: bool
-    approved_by: List[str]
+    approved_by: list[str]
     created_at: datetime
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "number": self.number,
             "title": self.title,
@@ -51,7 +52,7 @@ class BuildableIssue:
             "votes": self.thumbs_up_count,
             "approved": self.has_staff_approval,
             "approved_by": self.approved_by,
-            "created": self.created_at.isoformat()
+            "created": self.created_at.isoformat(),
         }
 
 
@@ -70,7 +71,7 @@ class GitHubIssueManager:
         self.repo = self.github.get_repo(repo_name)
         self.repo_name = repo_name
 
-    def get_buildable_issues(self) -> List[BuildableIssue]:
+    def get_buildable_issues(self) -> list[BuildableIssue]:
         """
         Fetch all issues that are buildable (open, approved, not in-progress).
 
@@ -80,7 +81,7 @@ class GitHubIssueManager:
         buildable = []
 
         # Fetch open issues (limit to feature-request label if exists)
-        for issue in self.repo.get_issues(state='open'):
+        for issue in self.repo.get_issues(state="open"):
             # Skip if already being built
             if self._has_label(issue, LABEL_BUILDING):
                 continue
@@ -97,23 +98,25 @@ class GitHubIssueManager:
             # Count visitor votes (👍)
             thumbs_up = self._count_thumbs_up(issue)
 
-            buildable.append(BuildableIssue(
-                number=issue.number,
-                title=issue.title,
-                body=issue.body or "",
-                labels=[label.name for label in issue.labels],
-                thumbs_up_count=thumbs_up,
-                has_staff_approval=True,
-                approved_by=approvers,
-                created_at=issue.created_at
-            ))
+            buildable.append(
+                BuildableIssue(
+                    number=issue.number,
+                    title=issue.title,
+                    body=issue.body or "",
+                    labels=[label.name for label in issue.labels],
+                    thumbs_up_count=thumbs_up,
+                    has_staff_approval=True,
+                    approved_by=approvers,
+                    created_at=issue.created_at,
+                )
+            )
 
         # Sort by votes (high to low), then by age (old to new)
         buildable.sort(key=lambda i: (-i.thumbs_up_count, i.created_at))
 
         return buildable
 
-    def get_next_buildable_issue(self) -> Optional[BuildableIssue]:
+    def get_next_buildable_issue(self) -> BuildableIssue | None:
         """
         Select the next issue to build (highest priority approved issue).
 
@@ -136,10 +139,7 @@ class GitHubIssueManager:
         return self.repo.get_issue(issue_number)
 
     def mark_issue_building(
-        self,
-        issue_number: int,
-        session_id: str,
-        is_rebase: bool = False
+        self, issue_number: int, session_id: str, is_rebase: bool = False
     ) -> None:
         """
         Mark an issue as being built by adding label and comment.
@@ -162,8 +162,10 @@ class GitHubIssueManager:
         issue.add_to_labels(LABEL_BUILDING)
 
         # Add comment with session info
-        timestamp = datetime.utcnow().isoformat() + 'Z'
-        rebase_note = "\n*Rebuilding on latest main after merge conflict.*" if is_rebase else ""
+        timestamp = datetime.utcnow().isoformat() + "Z"
+        rebase_note = (
+            "\n*Rebuilding on latest main after merge conflict.*" if is_rebase else ""
+        )
 
         comment = f"""🤖 **Agent Started Building**
 
@@ -181,7 +183,7 @@ Commits will be pushed to branch `issue-{issue_number}`.
         issue_number: int,
         session_id: str,
         staging_url: str,
-        production_url: Optional[str] = None
+        production_url: str | None = None,
     ) -> None:
         """
         Mark issue as complete after successful E2E tests and deploy.
@@ -201,7 +203,7 @@ Commits will be pushed to branch `issue-{issue_number}`.
             issue.add_to_labels(LABEL_DEPLOYED)
 
         # Add completion comment
-        timestamp = datetime.utcnow().isoformat() + 'Z'
+        timestamp = datetime.utcnow().isoformat() + "Z"
         prod_line = f"\n- 🌐 Production: {production_url}" if production_url else ""
 
         comment = f"""✅ **Build Complete!**
@@ -217,14 +219,14 @@ All E2E tests passed. Closing this issue.
         issue.create_comment(comment)
 
         # Close the issue
-        issue.edit(state='closed')
+        issue.edit(state="closed")
 
     def mark_issue_failed(
         self,
         issue_number: int,
         session_id: str,
         error_message: str,
-        workflow_url: Optional[str] = None
+        workflow_url: str | None = None,
     ) -> None:
         """
         Report build failure and remove in-progress label.
@@ -242,8 +244,12 @@ All E2E tests passed. Closing this issue.
         issue.add_to_labels(LABEL_FAILED)
 
         # Add failure comment
-        timestamp = datetime.utcnow().isoformat() + 'Z'
-        workflow_link = f"\n\nCheck [workflow run]({workflow_url}) for details." if workflow_url else ""
+        timestamp = datetime.utcnow().isoformat() + "Z"
+        workflow_link = (
+            f"\n\nCheck [workflow run]({workflow_url}) for details."
+            if workflow_url
+            else ""
+        )
 
         comment = f"""⚠️ **Build Failed**
 
@@ -369,7 +375,7 @@ Validate the feature by testing that:
 - Error handling works properly
 - Accessibility requirements met"""
 
-    def _get_staff_approvers(self, issue: Issue) -> List[str]:
+    def _get_staff_approvers(self, issue: Issue) -> list[str]:
         """
         Get list of staff members who approved (🚀 or 🎉).
 
@@ -383,8 +389,10 @@ Validate the feature by testing that:
         try:
             reactions = issue.get_reactions()
             for reaction in reactions:
-                if (reaction.content in ['rocket', 'hooray'] and
-                    reaction.user.login in AUTHORIZED_APPROVERS):
+                if (
+                    reaction.content in ["rocket", "hooray"]
+                    and reaction.user.login in AUTHORIZED_APPROVERS
+                ):
                     approvers.append(reaction.user.login)
         except GithubException:
             pass
@@ -402,7 +410,7 @@ Validate the feature by testing that:
         """
         try:
             reactions = issue.get_reactions()
-            return sum(1 for r in reactions if r.content == '+1')
+            return sum(1 for r in reactions if r.content == "+1")
         except GithubException:
             return 0
 
