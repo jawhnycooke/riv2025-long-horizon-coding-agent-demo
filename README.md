@@ -2,6 +2,175 @@
 
 An autonomous agent system that builds React applications from GitHub issues using AWS Bedrock AgentCore and the Claude Agent SDK. Demonstrated at AWS re:Invent 2025.
 
+## Architecture
+
+### System Overview
+
+```mermaid
+flowchart TB
+    subgraph GitHub["GitHub Repository"]
+        Issues["📋 Issues<br/>(Feature Requests)"]
+        Actions["⚡ GitHub Actions"]
+        Labels["🏷️ Labels<br/>(agent-building, agent-complete)"]
+    end
+
+    subgraph AWS["AWS Cloud"]
+        subgraph AgentCore["Bedrock AgentCore"]
+            Entrypoint["bedrock_entrypoint.py<br/>(Orchestrator)"]
+            Agent["claude_code.py<br/>(Session Manager)"]
+            SDK["Claude Agent SDK"]
+        end
+
+        ECS["ECS Fargate"]
+        EFS["EFS<br/>(Persistent Storage)"]
+        ECR["ECR<br/>(Container Registry)"]
+        CW["CloudWatch<br/>(Metrics & Logs)"]
+        SM["Secrets Manager<br/>(API Keys)"]
+        CF["CloudFront<br/>(Preview CDN)"]
+        S3["S3<br/>(Preview Assets)"]
+    end
+
+    subgraph LocalDev["Local Development"]
+        CLI["python claude_code.py"]
+        Config[".claude-code.json"]
+    end
+
+    Issues -->|"🚀 Approved"| Actions
+    Actions -->|"Invoke"| AgentCore
+    AgentCore --> ECS
+    ECS --> EFS
+    ECS --> ECR
+    Entrypoint --> Agent
+    Agent --> SDK
+    Agent -->|"Heartbeat"| CW
+    Entrypoint -->|"Fetch secrets"| SM
+    Agent -->|"Update labels"| Labels
+    Agent -->|"Post comments"| Issues
+    Actions -->|"Deploy"| S3
+    S3 --> CF
+
+    CLI --> Agent
+    Config --> CLI
+```
+
+### Issue-to-Deployment Workflow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant GitHub as GitHub Issues
+    participant Poller as Issue Poller<br/>(every 5 min)
+    participant Builder as Agent Builder
+    participant AgentCore as Bedrock AgentCore
+    participant Agent as Claude Agent
+    participant Deploy as Deploy Preview
+
+    User->>GitHub: Create issue with feature request
+    User->>GitHub: Vote with 👍
+    User->>GitHub: Approve with 🚀
+
+    Poller->>GitHub: Check for approved issues
+    GitHub-->>Poller: Return approved issues (sorted by votes)
+    Poller->>Builder: Trigger build for top issue
+
+    Builder->>GitHub: Add "agent-building" label
+    Builder->>AgentCore: Invoke with issue number
+
+    AgentCore->>Agent: Start session
+
+    loop Build Loop
+        Agent->>Agent: Read BUILD_PLAN.md
+        Agent->>Agent: Implement feature
+        Agent->>Agent: Take screenshots
+        Agent->>Agent: Run tests
+        Agent->>GitHub: Push commits
+        Agent->>GitHub: Post progress comment
+    end
+
+    Agent->>GitHub: Signal completion 🎉
+    Agent->>GitHub: Remove "agent-building"
+    Agent->>GitHub: Add "agent-complete"
+
+    Deploy->>GitHub: Triggered by label
+    Deploy->>Deploy: Build & deploy to CloudFront
+    Deploy->>GitHub: Post preview URL
+```
+
+### Security Model
+
+```mermaid
+flowchart LR
+    subgraph Agent["Claude Agent"]
+        SDK["Claude SDK"]
+        Tools["Tool Calls"]
+    end
+
+    subgraph Hooks["Security Hooks (src/security.py)"]
+        PathHook["universal_path_security_hook<br/>━━━━━━━━━━━━━━━━━━━<br/>✓ Validate paths inside project<br/>✗ Block external file access"]
+        BashHook["bash_security_hook<br/>━━━━━━━━━━━━━━━━━━━<br/>✓ Allowlist: npm, git, node...<br/>✗ Block: rm -rf, curl, wget..."]
+        TestHook["track_read_hook<br/>━━━━━━━━━━━━━━━━━━━<br/>✓ Track screenshot reads<br/>✓ Verify before test pass"]
+    end
+
+    subgraph Audit["Audit Trail"]
+        AuditLog["audit.log<br/>(JSON-parseable)"]
+    end
+
+    Tools -->|"File ops"| PathHook
+    Tools -->|"Bash cmds"| BashHook
+    Tools -->|"Read files"| TestHook
+
+    PathHook -->|"Log blocked"| AuditLog
+    BashHook -->|"Log blocked"| AuditLog
+    TestHook -->|"Log access"| AuditLog
+
+    PathHook -->|"✓ Allowed"| Execute["Execute Tool"]
+    BashHook -->|"✓ Allowed"| Execute
+```
+
+### Session State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> continuous: Start agent
+
+    continuous --> continuous: Process issue
+    continuous --> run_once: Single task mode
+    continuous --> pause: Completion signal 🎉
+    continuous --> terminated: Error/timeout
+
+    run_once --> continuous: More issues
+    run_once --> pause: No more issues
+    run_once --> terminated: Error
+
+    pause --> continuous: Resume (new issue)
+    pause --> run_cleanup: Cleanup requested
+    pause --> terminated: Stop command
+
+    run_cleanup --> pause: Cleanup done
+    run_cleanup --> terminated: Error
+
+    terminated --> [*]
+
+    note right of continuous
+        Active processing
+        - Building features
+        - Running tests
+        - Pushing commits
+    end note
+
+    note right of pause
+        Idle state
+        - Waiting for new issues
+        - Mission Control can resume
+    end note
+
+    note right of run_cleanup
+        Technical debt removal
+        - Refactoring
+        - Dead code cleanup
+    end note
+```
+
 ## How It Works
 
 ### End-to-End Flow
