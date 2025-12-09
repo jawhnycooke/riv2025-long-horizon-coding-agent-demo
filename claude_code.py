@@ -35,16 +35,16 @@ from src import (
     TokenTracker,
     __version__,
 )
-from src.session_manager import parse_build_plan_version
 from src.config import (
+    CompletionSignalSettings,
     ProjectConfig,
     Provider,
     apply_provider_config,
     load_project_config,
 )
 from src.security import SecurityValidator
+from src.session_manager import parse_build_plan_version
 from src.tracing import (
-    TracingManager,
     get_tracing_manager,
     initialize_tracing,
 )
@@ -53,6 +53,7 @@ from src.tracing import (
 # Global state
 PROJECT_ROOT: str | None = None
 SESSION_ID: str | None = None
+COMPLETION_SIGNAL_SETTINGS: CompletionSignalSettings | None = None
 
 # Constants
 COMPLETION_CONFIRMATIONS_REQUIRED = 1
@@ -149,13 +150,41 @@ def _detect_error_patterns(text: str) -> tuple[bool, bool, bool]:
     )
 
 
+def get_completion_signal() -> str:
+    """Get the completion signal string.
+
+    Returns the configured completion signal if available,
+    otherwise returns the default signal.
+    """
+    from src.config import DEFAULT_COMPLETION_SIGNAL
+
+    if COMPLETION_SIGNAL_SETTINGS:
+        return COMPLETION_SIGNAL_SETTINGS.signal
+    return DEFAULT_COMPLETION_SIGNAL
+
+
 def _detect_completion_signal(text: str) -> bool:
-    """Detect completion signal in text."""
+    """Detect completion signal in text.
+
+    Uses configurable completion signal settings if available,
+    otherwise falls back to default COMPLETION_MARKERS.
+    """
     text_lower = text.lower()
+
+    # Use configurable settings if available
+    if COMPLETION_SIGNAL_SETTINGS:
+        emoji = COMPLETION_SIGNAL_SETTINGS.emoji
+        complete_phrase = COMPLETION_SIGNAL_SETTINGS.complete_phrase.lower()
+        finished_phrase = COMPLETION_SIGNAL_SETTINGS.finished_phrase.lower()
+    else:
+        emoji = COMPLETION_MARKERS["emoji"]
+        complete_phrase = COMPLETION_MARKERS["complete"]
+        finished_phrase = COMPLETION_MARKERS["finished"]
+
     has_markers = (
-        COMPLETION_MARKERS["emoji"] in text
-        and COMPLETION_MARKERS["complete"] in text_lower
-        and COMPLETION_MARKERS["finished"] in text_lower
+        emoji in text
+        and complete_phrase in text_lower
+        and finished_phrase in text_lower
     )
     has_exclusions = any(exclusion in text_lower for exclusion in COMPLETION_EXCLUSIONS)
     return has_markers and not has_exclusions
@@ -766,7 +795,7 @@ def dry_run_simulation(args: argparse.Namespace) -> bool:
     print("-" * 40)
     print(f"✓ Initialize session in: {output_dir}")
     print(f"✓ Copy prompts from: {prompts_dir}")
-    print(f"✓ Initialize git repository")
+    print("✓ Initialize git repository")
     print(f"✓ Start Claude Agent SDK with model: {effective_model}")
     print(f"✓ Run agent in {'cleanup' if args.cleanup_session else 'build'} mode")
     print()
@@ -2097,6 +2126,16 @@ async def main() -> None:
             builtins.print(f"   Model: {args.model} (from config)")
         else:
             builtins.print(f"   Model: {args.model}")
+
+        # Initialize completion signal settings from config
+        global COMPLETION_SIGNAL_SETTINGS
+        if project_config.completion_signal:
+            COMPLETION_SIGNAL_SETTINGS = project_config.completion_signal
+            builtins.print(
+                f"   Completion signal: {COMPLETION_SIGNAL_SETTINGS.signal[:50]}..."
+                if len(COMPLETION_SIGNAL_SETTINGS.signal) > 50
+                else f"   Completion signal: {COMPLETION_SIGNAL_SETTINGS.signal}"
+            )
     elif args.provider == "bedrock":
         # No config file but --provider bedrock was specified
         # Create a minimal config for Bedrock

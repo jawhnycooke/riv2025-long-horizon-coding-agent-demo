@@ -1,69 +1,61 @@
-# Implementation: F011 Improved Security Hook Messages
+# Implementation: F015 Configurable Completion Signal
 
 **Mode**: default | **Date**: 2025-12-08 | **Status**: Complete
 
-## 1. Changes (3 files, +377 lines new code, 20 tests)
-
-**Created**:
-- `src/error_messages.py` - SecurityErrorMessages factory class with 15 error message methods
-- `tests/test_error_messages.py` - Comprehensive test suite (20 tests, 100% coverage)
+## 1. Changes (4 files modified, +185 lines new code, 17 tests)
 
 **Modified**:
-- `src/security.py` - Updated all validation methods to use SecurityErrorMessages
-- `tests/test_security.py` - Updated test assertions to match new message format
-- `pyproject.toml` - Added asyncio marker for pytest
-- `CLAUDE.md` - Added Security Error Messages documentation section
-- `epcc-features.json` - Marked F011 as complete (81.25% overall)
+- `src/config.py` - Added `CompletionSignalSettings` dataclass with `from_dict()`, `to_dict()`, `default()` methods; updated `ProjectConfig` to include `completion_signal` field
+- `claude_code.py` - Added `COMPLETION_SIGNAL_SETTINGS` global, `get_completion_signal()` helper, updated `_detect_completion_signal()` to use configurable settings
+- `tests/test_config.py` - Added 17 tests for `CompletionSignalSettings` and `ProjectConfig` integration
+- `CLAUDE.md` - Added comprehensive completion signal configuration documentation
+- `epcc-features.json` - Marked F015 as complete (87.5% overall)
 
-## 2. Quality (Tests 49 | Security Clean | Docs Updated)
+## 2. Quality (Tests 230 | Black Formatted | Docs Updated)
 
-**Tests**: 49 tests covering security and error messages:
-- 20 tests for SecurityErrorMessages class (all message types)
-- 29 existing security tests (updated assertions)
-- Format consistency tests (emoji prefix, fix suggestions)
+**Tests**: 230 tests passing:
+- 17 new tests for CompletionSignalSettings
+- 12 tests for `from_dict()` / `to_dict()` / roundtrip
+- 5 tests for ProjectConfig integration
 
 **Code Quality**:
 - Black formatted
-- Ruff linted (no issues)
+- Ruff auto-fixed
 - All tests pass
 
 **Docs**: CLAUDE.md updated with:
-- Error message format specification
-- Error category table
-- Audit trail integration note
+- Configuration JSON example
+- Settings table with defaults
+- Detection logic explanation
+- Custom signal examples
 
 ## 3. Acceptance Criteria Verification
 
 | Criterion | Status | Implementation |
 |-----------|--------|---------------|
-| Path validation errors include attempted path and allowed root | ✅ | `path_outside_project()` shows both paths |
-| Bash command errors include blocked command and reason | ✅ | `command_not_allowed()` shows full command and suggests alternatives |
-| Test modification errors explain verification requirements | ✅ | `test_no_screenshot()` etc. explain full workflow |
-| Error messages are actionable (suggest fix) | ✅ | All messages include "💡 How to fix:" section |
-| Errors logged to audit trail | ✅ | All methods called before `get_audit_logger().log_*()` |
+| Completion signal configurable in .claude-code.json | ✅ | `completion_signal` object with `signal`, `emoji`, `complete_phrase`, `finished_phrase` |
+| Default remains current emoji string | ✅ | `DEFAULT_COMPLETION_SIGNAL` constant used when no config |
+| Signal can be plain text or include emoji | ✅ | Emoji auto-extracted from signal if not explicit |
+| Signal documented in CLAUDE.md | ✅ | Full section with examples and settings table |
+| bedrock_entrypoint.py reads signal from config | ✅ | N/A - bedrock_entrypoint.py uses agent_state.json pause state, not text parsing |
 
-## 4. Error Message Categories
+## 4. Configuration Schema
 
-### Path Validation
-- `path_outside_project()` - Shows attempted vs allowed paths
-- `no_project_root()` - Explains project configuration issue
-- `no_file_path()` - Indicates missing file path parameter
+```json
+{
+  "completion_signal": {
+    "signal": "🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED",
+    "emoji": "🎉",
+    "complete_phrase": "implementation complete",
+    "finished_phrase": "all tasks finished"
+  }
+}
+```
 
-### Command Validation
-- `command_not_allowed()` - Lists allowed commands, suggests alternatives
-- `rm_not_allowed()` - Explains rm restrictions (only node_modules)
-- `node_not_allowed()` - Shows allowed node patterns
-- `pkill_not_allowed()` - Lists allowed pkill patterns
-- `git_init_blocked()` - Explains existing repository
-
-### Test Modification
-- `sed_tests_json_blocked()` - Explains screenshot verification requirement
-- `bash_tests_json_blocked()` - Points to Edit tool workflow
-- `test_no_screenshot()` - Full screenshot capture instructions
-- `test_screenshot_not_viewed()` - Requires Read tool verification
-- `test_no_console_log()` - Full playwright-test.cjs command
-- `test_console_not_viewed()` - Points to console error check
-- `test_no_id_found()` - Explains context requirements
+**Detection Logic**: All three must be present:
+1. Emoji character
+2. `complete_phrase` (case-insensitive)
+3. `finished_phrase` (case-insensitive)
 
 ## 5. Handoff
 

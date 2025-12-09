@@ -1,6 +1,5 @@
 """Tests for src/config.py - Configuration loading and provider handling."""
 
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -9,10 +8,12 @@ import pytest
 
 from src.config import (
     DEFAULT_BEDROCK_REGION,
+    DEFAULT_COMPLETION_SIGNAL,
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
     MODEL_DISPLAY_NAMES,
     SUPPORTED_BEDROCK_REGIONS,
+    CompletionSignalSettings,
     ProjectConfig,
     Provider,
     apply_provider_config,
@@ -86,9 +87,7 @@ class TestProjectConfig:
 
         assert config.provider == DEFAULT_PROVIDER
 
-    def test_to_dict_anthropic(
-        self, project_config_anthropic: ProjectConfig
-    ) -> None:
+    def test_to_dict_anthropic(self, project_config_anthropic: ProjectConfig) -> None:
         """Convert Anthropic config to dictionary."""
         result = project_config_anthropic.to_dict()
 
@@ -144,7 +143,9 @@ class TestLoadProjectConfig:
 
         assert config is None
 
-    def test_load_uses_cwd_default(self, temp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_uses_cwd_default(
+        self, temp_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Default path is .claude-code.json in current directory."""
         monkeypatch.chdir(temp_dir)
 
@@ -229,7 +230,11 @@ class TestConstants:
     def test_supported_bedrock_regions(self) -> None:
         """All supported Bedrock regions are valid AWS regions."""
         for region in SUPPORTED_BEDROCK_REGIONS:
-            assert region.startswith("us-") or region.startswith("eu-") or region.startswith("ap-")
+            assert (
+                region.startswith("us-")
+                or region.startswith("eu-")
+                or region.startswith("ap-")
+            )
 
     def test_default_bedrock_region_is_supported(self) -> None:
         """Default Bedrock region is in supported list."""
@@ -252,9 +257,7 @@ class TestTemplateVars:
 class TestBoto3Session:
     """Tests for get_boto3_session and get_boto3_client functions."""
 
-    def test_session_uses_explicit_profile(
-        self, clean_env: None, mocker: Any
-    ) -> None:
+    def test_session_uses_explicit_profile(self, clean_env: None, mocker: Any) -> None:
         """Explicit profile parameter takes priority."""
         import boto3
 
@@ -329,9 +332,7 @@ class TestBoto3Session:
         assert hasattr(client, "meta")
         assert client.meta.service_model.service_name == "sts"
 
-    def test_client_uses_profile_and_region(
-        self, clean_env: None, mocker: Any
-    ) -> None:
+    def test_client_uses_profile_and_region(self, clean_env: None, mocker: Any) -> None:
         """get_boto3_client passes profile and region to session."""
         import boto3
 
@@ -349,3 +350,182 @@ class TestBoto3Session:
             profile_name="test-profile", region_name="us-west-2"
         )
         mock_session.client.assert_called_once_with("sts")
+
+
+class TestCompletionSignalSettings:
+    """Tests for CompletionSignalSettings dataclass."""
+
+    def test_default_values(self) -> None:
+        """Default instance uses expected defaults."""
+        settings = CompletionSignalSettings()
+
+        assert settings.signal == DEFAULT_COMPLETION_SIGNAL
+        assert settings.emoji == "🎉"
+        assert settings.complete_phrase == "implementation complete"
+        assert settings.finished_phrase == "all tasks finished"
+
+    def test_default_class_method(self) -> None:
+        """default() class method returns default settings."""
+        settings = CompletionSignalSettings.default()
+
+        assert settings.signal == DEFAULT_COMPLETION_SIGNAL
+        assert settings.emoji == "🎉"
+
+    def test_from_dict_empty(self) -> None:
+        """Empty dict uses all defaults."""
+        settings = CompletionSignalSettings.from_dict({})
+
+        assert settings.signal == DEFAULT_COMPLETION_SIGNAL
+        assert settings.emoji == "🎉"
+        assert settings.complete_phrase == "implementation complete"
+        assert settings.finished_phrase == "all tasks finished"
+
+    def test_from_dict_custom_signal(self) -> None:
+        """Custom signal is used and emoji is extracted."""
+        data = {"signal": "✅ DONE - task complete - all done"}
+        settings = CompletionSignalSettings.from_dict(data)
+
+        assert settings.signal == "✅ DONE - task complete - all done"
+        assert settings.emoji == "✅"  # Extracted from signal
+
+    def test_from_dict_explicit_components(self) -> None:
+        """Explicit components override extraction."""
+        data = {
+            "signal": "🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED",
+            "emoji": "🚀",
+            "complete_phrase": "done building",
+            "finished_phrase": "all work complete",
+        }
+        settings = CompletionSignalSettings.from_dict(data)
+
+        assert settings.emoji == "🚀"
+        assert settings.complete_phrase == "done building"
+        assert settings.finished_phrase == "all work complete"
+
+    def test_from_dict_signal_without_emoji(self) -> None:
+        """Signal without emoji uses default emoji."""
+        data = {"signal": "DONE - implementation complete - all tasks finished"}
+        settings = CompletionSignalSettings.from_dict(data)
+
+        assert settings.signal == "DONE - implementation complete - all tasks finished"
+        assert settings.emoji == "🎉"  # Falls back to default
+
+    def test_from_dict_extracts_first_emoji(self) -> None:
+        """Extracts first emoji from signal with multiple emojis."""
+        data = {"signal": "🎯 Target hit 🎉 Celebration!"}
+        settings = CompletionSignalSettings.from_dict(data)
+
+        assert settings.emoji == "🎯"  # First emoji extracted
+
+    def test_to_dict_defaults(self) -> None:
+        """to_dict only includes signal when defaults used."""
+        settings = CompletionSignalSettings()
+        result = settings.to_dict()
+
+        assert result == {"signal": DEFAULT_COMPLETION_SIGNAL}
+        assert "emoji" not in result
+        assert "complete_phrase" not in result
+        assert "finished_phrase" not in result
+
+    def test_to_dict_custom_values(self) -> None:
+        """to_dict includes non-default values."""
+        settings = CompletionSignalSettings(
+            signal="Custom signal",
+            emoji="🚀",
+            complete_phrase="custom complete",
+            finished_phrase="custom finished",
+        )
+        result = settings.to_dict()
+
+        assert result["signal"] == "Custom signal"
+        assert result["emoji"] == "🚀"
+        assert result["complete_phrase"] == "custom complete"
+        assert result["finished_phrase"] == "custom finished"
+
+    def test_roundtrip_conversion(self) -> None:
+        """Settings survive from_dict -> to_dict roundtrip."""
+        original_data = {
+            "signal": "✅ BUILD COMPLETE - ALL TESTS PASSED",
+            "emoji": "✅",
+            "complete_phrase": "build complete",
+            "finished_phrase": "all tests passed",
+        }
+        settings = CompletionSignalSettings.from_dict(original_data)
+        result = settings.to_dict()
+
+        assert result["signal"] == original_data["signal"]
+        assert result["emoji"] == original_data["emoji"]
+        assert result["complete_phrase"] == original_data["complete_phrase"]
+        assert result["finished_phrase"] == original_data["finished_phrase"]
+
+
+class TestProjectConfigCompletionSignal:
+    """Tests for ProjectConfig integration with CompletionSignalSettings."""
+
+    def test_from_dict_without_completion_signal(self) -> None:
+        """Config without completion_signal has None."""
+        config = ProjectConfig.from_dict({})
+
+        assert config.completion_signal is None
+
+    def test_from_dict_with_completion_signal(self) -> None:
+        """Config with completion_signal parses settings."""
+        data = {
+            "completion_signal": {
+                "signal": "🚀 LAUNCH COMPLETE",
+            }
+        }
+        config = ProjectConfig.from_dict(data)
+
+        assert config.completion_signal is not None
+        assert config.completion_signal.signal == "🚀 LAUNCH COMPLETE"
+        assert config.completion_signal.emoji == "🚀"
+
+    def test_to_dict_without_completion_signal(self) -> None:
+        """to_dict excludes completion_signal when None."""
+        config = ProjectConfig(
+            provider=Provider.ANTHROPIC,
+            model=DEFAULT_MODEL,
+        )
+        result = config.to_dict()
+
+        assert "completion_signal" not in result
+
+    def test_to_dict_with_completion_signal(self) -> None:
+        """to_dict includes completion_signal when set."""
+        config = ProjectConfig(
+            provider=Provider.ANTHROPIC,
+            model=DEFAULT_MODEL,
+            completion_signal=CompletionSignalSettings(
+                signal="✅ COMPLETE",
+                emoji="✅",
+            ),
+        )
+        result = config.to_dict()
+
+        assert "completion_signal" in result
+        assert result["completion_signal"]["signal"] == "✅ COMPLETE"
+
+    def test_config_roundtrip_with_completion_signal(self) -> None:
+        """Config with completion_signal survives roundtrip."""
+        original_data = {
+            "provider": "anthropic",
+            "model": DEFAULT_MODEL,
+            "completion_signal": {
+                "signal": "🎯 TARGET HIT - all objectives achieved",
+                "emoji": "🎯",
+                "complete_phrase": "target hit",
+                "finished_phrase": "all objectives achieved",
+            },
+        }
+        config = ProjectConfig.from_dict(original_data)
+        result = config.to_dict()
+
+        assert (
+            result["completion_signal"]["signal"]
+            == original_data["completion_signal"]["signal"]
+        )
+        assert (
+            result["completion_signal"]["emoji"]
+            == original_data["completion_signal"]["emoji"]
+        )

@@ -344,10 +344,56 @@ The agent creates React+Vite+Tailwind apps in `generated-app/`:
 
 ### Completion Signal
 
-Agent signals completion with: `🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED`
+Agent signals completion with a configurable message. Default: `🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED`
 
-This triggers:
-1. State transition to pause
+**Configuration** (in `.claude-code.json`):
+```json
+{
+  "completion_signal": {
+    "signal": "🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED",
+    "emoji": "🎉",
+    "complete_phrase": "implementation complete",
+    "finished_phrase": "all tasks finished"
+  }
+}
+```
+
+**Settings:**
+| Field | Default | Description |
+|-------|---------|-------------|
+| `signal` | `🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED` | Full completion message output by agent |
+| `emoji` | Auto-extracted from signal, or `🎉` | Emoji marker for detection |
+| `complete_phrase` | `implementation complete` | Phrase to detect (case-insensitive) |
+| `finished_phrase` | `all tasks finished` | Second phrase to detect (case-insensitive) |
+
+**Detection Logic:**
+The completion signal is detected when ALL of the following are present in agent output:
+1. The configured emoji character
+2. The `complete_phrase` (case-insensitive)
+3. The `finished_phrase` (case-insensitive)
+
+**Custom Signal Examples:**
+```json
+// Minimal config - just change the signal, phrases auto-extracted
+{
+  "completion_signal": {
+    "signal": "✅ BUILD COMPLETE - ALL TESTS PASSED"
+  }
+}
+
+// Full customization
+{
+  "completion_signal": {
+    "signal": "🚀 LAUNCH SUCCESSFUL",
+    "emoji": "🚀",
+    "complete_phrase": "launch successful",
+    "finished_phrase": "launch successful"
+  }
+}
+```
+
+**What Triggers on Completion:**
+1. State transition to `pause`
 2. `agent-complete` label on GitHub issue
 3. Deploy preview workflow
 

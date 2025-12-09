@@ -328,8 +328,8 @@
       "name": "Configurable Completion Signal",
       "description": "Make the completion signal configurable instead of hardcoded",
       "priority": "P2",
-      "status": "pending",
-      "passes": false,
+      "status": "complete",
+      "passes": true,
       "acceptanceCriteria": [
         "Completion signal configurable in .claude-code.json",
         "Default remains current emoji string",
@@ -338,10 +338,10 @@
         "bedrock_entrypoint.py reads signal from config"
       ],
       "subtasks": [
-        {"task": "Add completion_signal to config schema", "status": "pending"},
-        {"task": "Update claude_code.py to use config signal", "status": "pending"},
-        {"task": "Update bedrock_entrypoint.py", "status": "pending"},
-        {"task": "Document in CLAUDE.md", "status": "pending"}
+        {"task": "Add completion_signal to config schema", "status": "complete"},
+        {"task": "Update claude_code.py to use config signal", "status": "complete"},
+        {"task": "Update bedrock_entrypoint.py", "status": "complete"},
+        {"task": "Document in CLAUDE.md", "status": "complete"}
       ],
       "source": "Code Review#quick-wins"
     },
@@ -369,9 +369,9 @@
   ],
   "metrics": {
     "total": 16,
-    "verified": 13,
+    "verified": 14,
     "inProgress": 0,
-    "pending": 3,
-    "percentComplete": 81.25
+    "pending": 2,
+    "percentComplete": 87.5
   }
 }
