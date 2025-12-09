@@ -12,11 +12,13 @@ Key responsibilities:
 - Token file management for hooks
 """
 
+import atexit
 import builtins
 import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Constants
 GIT_USER_NAME = "Claude Code Agent"
 GIT_USER_EMAIL = "agent@anthropic.com"
-GITHUB_TOKEN_FILE = "/tmp/github_token"
+GITHUB_TOKEN_FILE = "/tmp/github_token"  # Legacy path, prefer secure_create_token_file
 COMMITS_QUEUE_FILE = "/tmp/commits_to_announce.txt"
 DEFAULT_NOTIFICATION_INTERVAL = 300  # 5 minutes
 
@@ -48,6 +50,101 @@ class GitOperationError(Exception):
         super().__init__(message)
         self.stderr = stderr
         self.returncode = returncode
+
+
+# F022: Global registry of token files for cleanup on exit
+_token_files_to_cleanup: list[str] = []
+
+
+def _cleanup_token_files() -> None:
+    """Cleanup handler called at exit to remove all token files.
+
+    F022: Ensures no token files are left on disk after session ends.
+    """
+    for path in _token_files_to_cleanup:
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+                logger.debug(f"Cleaned up token file: {path}")
+        except OSError as e:
+            logger.warning(f"Failed to cleanup token file {path}: {e}")
+    _token_files_to_cleanup.clear()
+
+
+# Register cleanup handler
+atexit.register(_cleanup_token_files)
+
+
+def secure_create_token_file(token: str, prefix: str = "gh_token_") -> str:
+    """Create a token file with secure permissions from the start.
+
+    F022: This function creates the token file securely:
+    1. Uses os.open() with mode 0o600 to atomically create with restricted permissions
+    2. Registers the file for cleanup on process exit
+    3. No race condition where file is briefly world-readable
+
+    Args:
+        token: The GitHub token to write
+        prefix: Prefix for the temp file name
+
+    Returns:
+        Path to the created token file
+
+    Raises:
+        OSError: If file creation fails
+    """
+    # Create file with restricted permissions atomically
+    # O_CREAT | O_EXCL | O_WRONLY ensures atomic create
+    fd = None
+    path = os.path.join(tempfile.gettempdir(), f"{prefix}{os.getpid()}")
+
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.write(fd, token.encode("utf-8"))
+
+        # Register for cleanup
+        _token_files_to_cleanup.append(path)
+
+        logger.debug(f"Created secure token file at {path}")
+        return path
+
+    except FileExistsError:
+        # File already exists, update it (from a previous run)
+        fd = os.open(path, os.O_WRONLY | os.O_TRUNC, 0o600)
+        os.write(fd, token.encode("utf-8"))
+
+        if path not in _token_files_to_cleanup:
+            _token_files_to_cleanup.append(path)
+
+        return path
+
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def cleanup_token_file(path: str) -> bool:
+    """Manually cleanup a specific token file.
+
+    F022: Allows explicit cleanup before process exit.
+
+    Args:
+        path: Path to the token file to remove
+
+    Returns:
+        True if file was removed, False otherwise
+    """
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+            if path in _token_files_to_cleanup:
+                _token_files_to_cleanup.remove(path)
+            logger.debug(f"Manually cleaned up token file: {path}")
+            return True
+        return False
+    except OSError as e:
+        logger.warning(f"Failed to cleanup token file {path}: {e}")
+        return False
 
 
 @dataclass
@@ -112,6 +209,9 @@ class GitManager:
         # Batched notification tracking
         self._pending_notification_commits: list[str] = []
         self._last_notification_time: float = time.time()
+
+        # F022: Track token file path for secure handling
+        self._token_file_path: str | None = None
 
     # =========================================================================
     # Core Git Operations
@@ -398,6 +498,9 @@ class GitManager:
     def refresh_token_file(self) -> bool:
         """Write GitHub token to file for post-commit hook to read.
 
+        F022: Uses secure_create_token_file to create with restricted permissions
+        from the start (no race condition). File is registered for cleanup on exit.
+
         Returns:
             True if successful, False otherwise
         """
@@ -405,12 +508,25 @@ class GitManager:
             return False
 
         try:
-            with open(GITHUB_TOKEN_FILE, "w") as f:
-                f.write(self.github_config.token)
-            os.chmod(GITHUB_TOKEN_FILE, 0o600)  # Read/write for owner only
+            # F022: Use secure token file creation
+            self._token_file_path = secure_create_token_file(self.github_config.token)
+
+            # Also write to legacy path for backwards compatibility
+            # with existing hooks that reference GITHUB_TOKEN_FILE
+            fd = os.open(GITHUB_TOKEN_FILE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, self.github_config.token.encode("utf-8"))
+            finally:
+                os.close(fd)
+
+            # Register legacy path for cleanup if not already registered
+            if GITHUB_TOKEN_FILE not in _token_files_to_cleanup:
+                _token_files_to_cleanup.append(GITHUB_TOKEN_FILE)
+
             return True
-        except Exception as e:
+        except OSError as e:
             builtins.print(f"⚠️ Failed to write GitHub token file: {e}")
+            logger.error(f"Failed to create token file: {e}")
             return False
 
     def install_post_commit_hook(self, repo_path: Path | None = None) -> bool:
@@ -808,9 +924,38 @@ exit 0
 
         Called when transitioning between issues to ensure commits
         from the previous issue don't affect tracking for the new one.
+
+        F022: Also cleans up token files for security.
         """
         self._announced_commits.clear()
         self._session_commits.clear()
         self._pending_notification_commits.clear()
         self._hooked_git_dirs.clear()
         self._last_notification_time = time.time()
+
+        # F022: Cleanup token file when resetting session
+        self.cleanup_token_files()
+
+    def cleanup_token_files(self) -> None:
+        """Clean up any token files created by this GitManager.
+
+        F022: Explicit cleanup of token files. Also called automatically
+        via atexit handler, but can be called manually for immediate cleanup.
+        """
+        if self._token_file_path:
+            cleanup_token_file(self._token_file_path)
+            self._token_file_path = None
+
+        # Also cleanup the legacy token file
+        cleanup_token_file(GITHUB_TOKEN_FILE)
+
+    @property
+    def token_file_path(self) -> str | None:
+        """Get the current token file path.
+
+        F022: Returns the secure token file path if one was created.
+
+        Returns:
+            Path to the token file, or None if not created
+        """
+        return self._token_file_path
