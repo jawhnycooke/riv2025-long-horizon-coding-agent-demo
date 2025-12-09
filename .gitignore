@@ -68,3 +68,9 @@ archive_old_scripts/
 
 # Project configuration (may contain API keys)
 .claude-code.json
+
+# UV lock file (using requirements.txt for dependencies)
+uv.lock
+
+# Temporary workflow documentation
+EPCC_COMMIT.md

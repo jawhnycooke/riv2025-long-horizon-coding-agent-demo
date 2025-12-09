@@ -3,8 +3,9 @@
 import json
 import os
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -163,9 +164,7 @@ def mock_git_repo(temp_dir: Path) -> Path:
 def mock_subprocess() -> Generator[MagicMock, None, None]:
     """Mock subprocess.run for git command testing."""
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="success", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="success", stderr="")
         yield mock_run
 
 

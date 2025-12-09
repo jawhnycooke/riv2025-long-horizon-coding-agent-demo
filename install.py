@@ -319,9 +319,7 @@ def select_bedrock_region(current: str | None = None) -> str | None:
     ).ask()
 
 
-def select_aws_profile(
-    detected_profile: str, current: str | None = None
-) -> str | None:
+def select_aws_profile(detected_profile: str, current: str | None = None) -> str | None:
     """Prompt user to confirm or change AWS profile.
 
     Args:

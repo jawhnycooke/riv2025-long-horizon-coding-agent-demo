@@ -1,15 +1,10 @@
 """Tests for src/tracing.py - OpenTelemetry tracing utilities."""
 
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
 import pytest
 
 from src.config import TracingSettings
 from src.tracing import (
     NoOpSpan,
-    ToolCallTracer,
     TracingManager,
     get_tracing_manager,
     initialize_tracing,
@@ -87,18 +82,14 @@ class TestTracingManager:
         # but _enabled should be True
         assert manager._enabled is True
 
-    def test_env_var_override_enables(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_var_override_enables(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """OTEL_TRACING_ENABLED=true enables tracing."""
         monkeypatch.setenv("OTEL_TRACING_ENABLED", "true")
         settings = TracingSettings(enabled=False)
         manager = TracingManager(settings)
         assert manager._enabled is True
 
-    def test_env_var_override_disables(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_var_override_disables(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """OTEL_TRACING_ENABLED=false disables tracing."""
         monkeypatch.setenv("OTEL_TRACING_ENABLED", "false")
         settings = TracingSettings(enabled=True)
@@ -214,6 +205,7 @@ class TestGlobalFunctions:
         """get_tracing_manager returns singleton."""
         # Clear any existing global manager
         import src.tracing as tracing_module
+
         tracing_module._global_tracing = None
 
         manager1 = get_tracing_manager()
@@ -223,6 +215,7 @@ class TestGlobalFunctions:
     def test_initialize_tracing_with_settings(self) -> None:
         """initialize_tracing accepts settings."""
         import src.tracing as tracing_module
+
         tracing_module._global_tracing = None
 
         settings = TracingSettings(enabled=True, service_name="test-init")
@@ -232,6 +225,7 @@ class TestGlobalFunctions:
     def test_initialize_tracing_without_settings(self) -> None:
         """initialize_tracing works without settings (disabled)."""
         import src.tracing as tracing_module
+
         tracing_module._global_tracing = None
 
         result = initialize_tracing(None)

@@ -1,9 +1,6 @@
 """Tests for src/session_manager.py - Session management utilities."""
 
-import os
 from pathlib import Path
-
-import pytest
 
 from src.session_manager import parse_build_plan_version
 
@@ -56,7 +53,9 @@ class TestParseBuildPlanVersion:
     def test_frontmatter_without_version_returns_none(self, tmp_path: Path) -> None:
         """Frontmatter without version field returns None."""
         build_plan = tmp_path / "BUILD_PLAN.md"
-        build_plan.write_text('---\ntitle: "My Project"\nauthor: "Test"\n---\n\n# Content')
+        build_plan.write_text(
+            '---\ntitle: "My Project"\nauthor: "Test"\n---\n\n# Content'
+        )
 
         version = parse_build_plan_version(build_plan)
         assert version is None

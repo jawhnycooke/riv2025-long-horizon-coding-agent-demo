@@ -1,8 +1,6 @@
 """Tests for src/retry.py - Retry logic with exponential backoff."""
 
-import asyncio
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -56,12 +54,12 @@ class TestStatusCodes:
     def test_transient_status_codes(self) -> None:
         """Transient status codes are defined."""
         expected = {429, 500, 502, 503, 504}
-        assert TRANSIENT_STATUS_CODES == expected
+        assert expected == TRANSIENT_STATUS_CODES
 
     def test_permanent_status_codes(self) -> None:
         """Permanent status codes are defined."""
         expected = {400, 401, 403, 404, 405, 409, 422}
-        assert PERMANENT_STATUS_CODES == expected
+        assert expected == PERMANENT_STATUS_CODES
 
     def test_no_overlap(self) -> None:
         """Transient and permanent codes don't overlap."""

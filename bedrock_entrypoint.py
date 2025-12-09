@@ -23,8 +23,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, PingStatus
+
+from src.config import get_boto3_client
 
 
 # OpenTelemetry imports for session ID propagation

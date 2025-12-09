@@ -17,8 +17,10 @@ import functools
 import logging
 import random
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, ParamSpec, TypeVar
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, ParamSpec, TypeVar
+
 
 logger = logging.getLogger(__name__)
 
@@ -175,11 +177,8 @@ def is_transient_error(error: Exception) -> bool:
         "overloaded",
         "too many requests",
     ]
-    if any(pattern in error_str for pattern in transient_patterns):
-        return True
-
-    # Default: treat as non-transient (fail fast for unknown errors)
-    return False
+    # Return True if transient pattern found, otherwise False (fail fast)
+    return any(pattern in error_str for pattern in transient_patterns)
 
 
 def calculate_delay(attempt: int, config: RetryConfig) -> float:
@@ -202,7 +201,7 @@ def calculate_delay(attempt: int, config: RetryConfig) -> float:
 
     # Add jitter (random value between 0 and delay)
     if config.jitter:
-        delay = delay * (0.5 + random.random())  # noqa: S311 - not security sensitive
+        delay = delay * (0.5 + random.random())
 
     return delay
 
