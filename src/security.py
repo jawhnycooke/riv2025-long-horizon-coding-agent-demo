@@ -1,8 +1,10 @@
 """Security utilities for Claude Code."""
 
 import glob
+import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,26 +21,155 @@ from .error_messages import SecurityErrorMessages
 
 
 # ============================================================================
-# Screenshot Verification State
+# Screenshot Verification State (with persistence)
 # ============================================================================
 # Track which screenshots have been viewed (read) during the session.
 # This prevents the agent from marking tests as passing without actually
 # viewing the screenshot evidence.
+#
+# F025: State is now persisted to JSON file for session continuity.
+# Stale screenshots (>24h) are filtered out on load.
 
 _viewed_screenshots: set[str] = set()
+_verification_state_file: str | None = None
+_STALE_THRESHOLD_HOURS = 24
 
 
-def track_screenshot_read(file_path: str) -> None:
+def _get_verification_state_path(project_root: str) -> Path | None:
+    """Get path to verification state file.
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Path to .verification-state.json, or None if not determinable
+    """
+    issue_number = os.environ.get("ISSUE_NUMBER")
+    if not issue_number or not project_root:
+        return None
+    return Path(project_root) / "screenshots" / f"issue-{issue_number}" / ".verification-state.json"
+
+
+def _load_verification_state(state_path: Path) -> dict[str, Any]:
+    """Load verification state from JSON file.
+
+    Args:
+        state_path: Path to state file
+
+    Returns:
+        State dict with viewed_screenshots list and timestamps
+    """
+    if not state_path.exists():
+        return {"viewed_screenshots": {}}
+
+    try:
+        with open(state_path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"⚠️ Failed to load verification state: {e}")
+        return {"viewed_screenshots": {}}
+
+
+def _save_verification_state(state_path: Path, viewed: set[str]) -> None:
+    """Save verification state to JSON file.
+
+    Args:
+        state_path: Path to state file
+        viewed: Set of viewed screenshot paths
+    """
+    # Ensure directory exists
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create state dict with timestamps
+    now = datetime.now(timezone.utc).isoformat()
+    state = {
+        "last_updated": now,
+        "viewed_screenshots": {
+            path: now for path in viewed
+        }
+    }
+
+    try:
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+    except OSError as e:
+        print(f"⚠️ Failed to save verification state: {e}")
+
+
+def _filter_stale_screenshots(viewed_dict: dict[str, str]) -> set[str]:
+    """Filter out screenshots viewed more than 24 hours ago.
+
+    Args:
+        viewed_dict: Dict mapping path -> ISO timestamp
+
+    Returns:
+        Set of non-stale screenshot paths
+    """
+    now = datetime.now(timezone.utc)
+    result = set()
+
+    for path, timestamp_str in viewed_dict.items():
+        try:
+            timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            age_hours = (now - timestamp).total_seconds() / 3600
+            if age_hours < _STALE_THRESHOLD_HOURS:
+                result.add(path)
+            else:
+                print(f"📸 Filtered stale screenshot (>{_STALE_THRESHOLD_HOURS}h): {path}")
+        except (ValueError, TypeError):
+            # Invalid timestamp, skip this entry
+            pass
+
+    return result
+
+
+def initialize_screenshot_tracking(project_root: str | None) -> None:
+    """Initialize screenshot tracking, loading persisted state if available.
+
+    Call this at session start to restore verification state from previous sessions.
+
+    Args:
+        project_root: Project root directory
+    """
+    global _viewed_screenshots, _verification_state_file
+
+    if not project_root:
+        return
+
+    state_path = _get_verification_state_path(project_root)
+    if state_path:
+        _verification_state_file = str(state_path)
+        state = _load_verification_state(state_path)
+        viewed_dict = state.get("viewed_screenshots", {})
+        _viewed_screenshots = _filter_stale_screenshots(viewed_dict)
+
+        if _viewed_screenshots:
+            print(f"📸 Restored {len(_viewed_screenshots)} viewed screenshot(s) from previous session")
+
+
+def track_screenshot_read(file_path: str, project_root: str | None = None) -> None:
     """Track that a screenshot or console log was viewed by the agent.
 
     Args:
         file_path: Path to the screenshot/console file that was read
+        project_root: Project root directory for persistence (optional)
     """
+    global _verification_state_file
+
     if "screenshots/" in file_path:
         if file_path.endswith(".png") or file_path.endswith("-console.txt"):
             _viewed_screenshots.add(file_path)
             file_type = "screenshot" if file_path.endswith(".png") else "console log"
             print(f"📸 Tracked {file_type} view: {file_path}")
+
+            # F025: Persist state after each track operation
+            if _verification_state_file:
+                _save_verification_state(Path(_verification_state_file), _viewed_screenshots)
+            elif project_root:
+                state_path = _get_verification_state_path(project_root)
+                if state_path:
+                    _verification_state_file = str(state_path)
+                    _save_verification_state(state_path, _viewed_screenshots)
 
 
 def was_screenshot_viewed(file_path: str) -> bool:
@@ -778,6 +909,7 @@ class SecurityValidator:
 
         if tool_name == "Read":
             file_path = input_data.get("tool_input", {}).get("file_path", "")
-            track_screenshot_read(file_path)
+            # F025: Pass project_root for persistence
+            track_screenshot_read(file_path, project_root)
 
         return {}
