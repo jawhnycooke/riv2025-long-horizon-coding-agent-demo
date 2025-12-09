@@ -52,6 +52,7 @@ jobs:
           import os
           import re
           import boto3
+          from botocore.config import Config
           from botocore.exceptions import ClientError
           from github import Github
 
@@ -62,6 +63,10 @@ jobs:
           GITHUB_RUN_ID = os.environ['GITHUB_RUN_ID']
           GITHUB_SERVER_URL = os.environ.get('GITHUB_SERVER_URL', 'https://github.com')
           AGENT_ARN = "arn:aws:bedrock-agentcore:us-west-2:128673662201:runtime/antodo_agent-0UyfaL5NVq"
+
+          # F021: Boto3 timeout configuration
+          BOTO3_CONNECT_TIMEOUT = 10
+          BOTO3_READ_TIMEOUT = 30
 
 
           def extract_session_ids(comments):
@@ -93,7 +98,13 @@ jobs:
               try:
                   print(f"Stopping session: {session_id}")
 
-                  client = boto3.client('bedrock-agentcore', region_name='us-west-2')
+                  # F021: Configure client with timeouts to prevent indefinite hangs
+                  config = Config(
+                      connect_timeout=BOTO3_CONNECT_TIMEOUT,
+                      read_timeout=BOTO3_READ_TIMEOUT,
+                      retries={'max_attempts': 3, 'mode': 'adaptive'}
+                  )
+                  client = boto3.client('bedrock-agentcore', region_name='us-west-2', config=config)
 
                   response = client.stop_runtime_session(
                       agentRuntimeArn=AGENT_ARN,

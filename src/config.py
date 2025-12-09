@@ -470,16 +470,34 @@ def get_boto3_client(
     service_name: str,
     profile: str | None = None,
     region: str | None = None,
+    connect_timeout: int = 10,
+    read_timeout: int = 30,
+    max_retries: int = 3,
 ) -> Any:
-    """Create a boto3 client with optional profile and region.
+    """Create a boto3 client with optional profile, region, and timeouts.
+
+    F021: Added timeout configuration to prevent indefinite hangs on AWS API calls.
 
     Args:
         service_name: AWS service name (e.g., 'cloudwatch', 'secretsmanager')
         profile: AWS profile name (optional)
         region: AWS region (optional)
+        connect_timeout: Connection timeout in seconds (default: 10)
+        read_timeout: Read timeout in seconds (default: 30)
+        max_retries: Maximum retry attempts (default: 3)
 
     Returns:
-        Configured boto3 client
+        Configured boto3 client with timeouts
     """
+    from botocore.config import Config
+
     session = get_boto3_session(profile=profile, region=region)
-    return session.client(service_name)
+
+    # F021: Configure timeouts and retries to prevent indefinite hangs
+    config = Config(
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        retries={"max_attempts": max_retries, "mode": "adaptive"},
+    )
+
+    return session.client(service_name, config=config)

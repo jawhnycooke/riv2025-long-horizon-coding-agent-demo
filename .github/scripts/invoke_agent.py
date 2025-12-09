@@ -20,7 +20,12 @@ import time
 from typing import Any
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+
+# F021: Timeout configuration for boto3 client
+CONNECT_TIMEOUT = 30  # seconds to establish connection
+READ_TIMEOUT = 300  # seconds to wait for response (agent calls can be slow)
 
 
 class AgentInvoker:
@@ -30,7 +35,16 @@ class AgentInvoker:
         self.agent_arn = agent_arn
         self.region = region
         self.max_retries = max_retries
-        self.client = boto3.client("bedrock-agentcore", region_name=region)
+
+        # F021: Configure client with timeouts to prevent indefinite hangs
+        config = Config(
+            connect_timeout=CONNECT_TIMEOUT,
+            read_timeout=READ_TIMEOUT,
+            retries={"max_attempts": max_retries, "mode": "adaptive"},
+        )
+        self.client = boto3.client(
+            "bedrock-agentcore", region_name=region, config=config
+        )
 
     def invoke(self, payload: dict[str, Any], session_id: str) -> bool:
         """
