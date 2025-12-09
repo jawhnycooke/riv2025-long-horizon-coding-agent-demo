@@ -42,18 +42,22 @@ jobs:
       - name: Check session heartbeat via CloudWatch
         id: health
         run: |
+          # F019: Extended query window from 15 to 20 minutes to prevent edge-case misses
+          # This accounts for CloudWatch metric propagation delays and polling intervals
+          QUERY_WINDOW_MINUTES=20
+
           # Debug: show time range
           echo "Query time range:"
-          echo "  Start: $(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          echo "  Start: $(date -u -d "${QUERY_WINDOW_MINUTES} minutes ago" +%Y-%m-%dT%H:%M:%SZ)"
           echo "  End:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Query latest SessionHeartbeat metric (last 15 min window)
+          # Query latest SessionHeartbeat metric
           # Uses only Environment dimension so we can query without knowing issue number
           RESULT=$(aws cloudwatch get-metric-statistics \
             --namespace ClaudeCodeAgent \
             --metric-name SessionHeartbeat \
             --dimensions Name=Environment,Value=reinvent \
-            --start-time "$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
+            --start-time "$(date -u -d "${QUERY_WINDOW_MINUTES} minutes ago" +%Y-%m-%dT%H:%M:%SZ)" \
             --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --period 60 \
             --statistics Maximum \
@@ -68,12 +72,29 @@ jobs:
             echo "needs_restart=false" >> $GITHUB_OUTPUT
             echo "📭 No active session detected (no heartbeat metrics)"
           else
-            LATEST=$(echo "$RESULT" | jq -r '.Datapoints | sort_by(.Timestamp) | last | .Timestamp')
+            # F019: Add null check for timestamp to handle edge cases
+            LATEST=$(echo "$RESULT" | jq -r '.Datapoints | sort_by(.Timestamp) | last | .Timestamp // empty')
+
+            if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+              echo "status=no_session" >> $GITHUB_OUTPUT
+              echo "needs_restart=false" >> $GITHUB_OUTPUT
+              echo "⚠️ No valid timestamp in heartbeat metrics"
+              exit 0
+            fi
+
             echo "Latest heartbeat: $LATEST"
 
             # Check if heartbeat is stale (configurable via repo variable)
             STALENESS_THRESHOLD=${{ vars.HEARTBEAT_STALENESS_SECONDS || '300' }}
-            LATEST_EPOCH=$(date -d "$LATEST" +%s)
+            LATEST_EPOCH=$(date -d "$LATEST" +%s 2>/dev/null || echo "0")
+
+            if [ "$LATEST_EPOCH" -eq "0" ]; then
+              echo "status=error" >> $GITHUB_OUTPUT
+              echo "needs_restart=false" >> $GITHUB_OUTPUT
+              echo "⚠️ Could not parse timestamp: $LATEST"
+              exit 0
+            fi
+
             NOW_EPOCH=$(date +%s)
             AGE_SECONDS=$((NOW_EPOCH - LATEST_EPOCH))
 
@@ -220,8 +241,9 @@ jobs:
                   if not all(req_label in labels_lower for req_label in REQUIRED_LABELS):
                       continue  # Skip issues that don't have all required labels
 
-              # Check for rocket reaction from authorized staff
-              reactions = issue.get_reactions()
+              # F019: Cache reactions to avoid duplicate API calls
+              # Previously called get_reactions() twice per approved issue
+              reactions = list(issue.get_reactions())
               has_approval = False
 
               for reaction in reactions:
@@ -232,10 +254,11 @@ jobs:
                           break
 
               if has_approval:
+                  # F019: Reuse cached reactions list instead of calling get_reactions() again
                   approved_issues.append({
                       "number": issue.number,
                       "title": issue.title,
-                      "votes": sum(1 for r in issue.get_reactions() if r.content == "+1")
+                      "votes": sum(1 for r in reactions if r.content == "+1")
                   })
 
           # Sort by votes (highest first), then by issue number as tiebreaker
