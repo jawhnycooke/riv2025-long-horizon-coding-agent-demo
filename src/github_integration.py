@@ -71,14 +71,28 @@ class GitHubIssueManager:
         self.repo = self.github.get_repo(repo_name)
         self.repo_name = repo_name
 
-    def get_buildable_issues(self) -> list[BuildableIssue]:
+    def get_buildable_issues(
+        self, required_labels: list[str] | None = None
+    ) -> list[BuildableIssue]:
         """
         Fetch all issues that are buildable (open, approved, not in-progress).
+
+        Args:
+            required_labels: Optional list of labels that issues must have.
+                             If provided, only issues with ALL specified labels
+                             will be included. Label matching is case-insensitive.
 
         Returns:
             List of BuildableIssue sorted by votes desc, then created asc
         """
         buildable = []
+
+        # Normalize required labels for case-insensitive comparison
+        required_labels_lower = (
+            [label.lower().strip() for label in required_labels]
+            if required_labels
+            else None
+        )
 
         # Fetch open issues (limit to feature-request label if exists)
         for issue in self.repo.get_issues(state="open"):
@@ -89,6 +103,18 @@ class GitHubIssueManager:
             # Skip if already completed
             if self._has_label(issue, LABEL_COMPLETE):
                 continue
+
+            # Get issue labels for filtering
+            issue_labels = [label.name for label in issue.labels]
+            issue_labels_lower = [label.lower() for label in issue_labels]
+
+            # Filter by required labels if specified
+            if required_labels_lower:
+                if not all(
+                    req_label in issue_labels_lower
+                    for req_label in required_labels_lower
+                ):
+                    continue  # Skip issues that don't have all required labels
 
             # Check for staff approval (🚀 rocket or 🎉 hooray)
             approvers = self._get_staff_approvers(issue)
@@ -103,7 +129,7 @@ class GitHubIssueManager:
                     number=issue.number,
                     title=issue.title,
                     body=issue.body or "",
-                    labels=[label.name for label in issue.labels],
+                    labels=issue_labels,
                     thumbs_up_count=thumbs_up,
                     has_staff_approval=True,
                     approved_by=approvers,
@@ -116,14 +142,20 @@ class GitHubIssueManager:
 
         return buildable
 
-    def get_next_buildable_issue(self) -> BuildableIssue | None:
+    def get_next_buildable_issue(
+        self, required_labels: list[str] | None = None
+    ) -> BuildableIssue | None:
         """
         Select the next issue to build (highest priority approved issue).
+
+        Args:
+            required_labels: Optional list of labels that issues must have.
+                             Passed through to get_buildable_issues().
 
         Returns:
             BuildableIssue or None if no buildable issues
         """
-        buildable = self.get_buildable_issues()
+        buildable = self.get_buildable_issues(required_labels=required_labels)
         return buildable[0] if buildable else None
 
     def get_issue(self, issue_number: int) -> Issue:

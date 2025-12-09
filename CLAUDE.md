@@ -79,6 +79,9 @@ python claude_code.py --dry-run --project canopy
 # Dry run with provider override
 python claude_code.py --dry-run --project canopy --provider anthropic
 
+# Filter issues by labels (GitHub mode)
+python claude_code.py --project canopy --labels "feature,priority-high"
+
 # Install dependencies
 uv pip install -r requirements.txt
 ```
@@ -100,6 +103,36 @@ The `--dry-run` flag simulates agent execution without making API calls. It perf
 - CI/CD validation before deployment
 - Pre-flight checks before long-running sessions
 - Debugging configuration issues
+
+### Issue Label Filtering
+
+The `--labels` flag filters which GitHub issues the agent picks up (GitHub mode only).
+
+**CLI Usage:**
+```bash
+# Only pick up issues with the "feature" label
+python claude_code.py --project canopy --labels "feature"
+
+# Require multiple labels (comma-separated) - issues must have ALL labels
+python claude_code.py --project canopy --labels "feature,priority-high"
+```
+
+**Workflow Configuration:**
+Configure via the `ISSUE_LABELS` repository variable (Settings → Variables → Actions):
+```
+ISSUE_LABELS=feature,priority-high
+```
+
+**Behavior:**
+- Issues must have **ALL** specified labels to be picked up
+- Label matching is **case-insensitive** ("Feature" matches "feature")
+- When no labels specified, all approved issues are eligible (default behavior)
+- Works with both CLI (`--labels`) and issue-poller workflow (`ISSUE_LABELS` variable)
+
+**Use cases:**
+- Filter builds to specific issue types (e.g., only "feature" or "bug" labels)
+- Prioritize high-priority issues (e.g., require "priority-high" label)
+- Separate different environments (e.g., "production" vs "staging" labels)
 
 ## Architecture
 

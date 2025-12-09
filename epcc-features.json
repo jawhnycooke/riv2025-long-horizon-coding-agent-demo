@@ -216,8 +216,8 @@
       "name": "Issue Label Filtering",
       "description": "Support --labels flag to filter which GitHub issues the agent picks up",
       "priority": "P2",
-      "status": "pending",
-      "passes": false,
+      "status": "complete",
+      "passes": true,
       "acceptanceCriteria": [
         "--labels flag added to argument parser",
         "Multiple labels supported (comma-separated)",
@@ -226,10 +226,10 @@
         "Default behavior unchanged when no labels specified"
       ],
       "subtasks": [
-        {"task": "Add --labels argument", "status": "pending"},
-        {"task": "Update github_integration.py to filter by labels", "status": "pending"},
-        {"task": "Update issue-poller workflow", "status": "pending"},
-        {"task": "Document label filtering", "status": "pending"}
+        {"task": "Add --labels argument", "status": "complete"},
+        {"task": "Update github_integration.py to filter by labels", "status": "complete"},
+        {"task": "Update issue-poller workflow", "status": "complete"},
+        {"task": "Document label filtering", "status": "complete"}
       ],
       "source": "Code Review#nice-to-have"
     },
@@ -369,9 +369,9 @@
   ],
   "metrics": {
     "total": 16,
-    "verified": 14,
+    "verified": 15,
     "inProgress": 0,
-    "pending": 2,
-    "percentComplete": 87.5
+    "pending": 1,
+    "percentComplete": 93.75
   }
 }

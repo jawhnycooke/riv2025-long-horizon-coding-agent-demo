@@ -1,61 +1,45 @@
-# Implementation: F015 Configurable Completion Signal
+# Implementation: F010 Issue Label Filtering
 
 **Mode**: default | **Date**: 2025-12-08 | **Status**: Complete
 
-## 1. Changes (4 files modified, +185 lines new code, 17 tests)
+## 1. Changes (5 files modified, +200 lines new code, 12 tests)
 
 **Modified**:
-- `src/config.py` - Added `CompletionSignalSettings` dataclass with `from_dict()`, `to_dict()`, `default()` methods; updated `ProjectConfig` to include `completion_signal` field
-- `claude_code.py` - Added `COMPLETION_SIGNAL_SETTINGS` global, `get_completion_signal()` helper, updated `_detect_completion_signal()` to use configurable settings
-- `tests/test_config.py` - Added 17 tests for `CompletionSignalSettings` and `ProjectConfig` integration
-- `CLAUDE.md` - Added comprehensive completion signal configuration documentation
-- `epcc-features.json` - Marked F015 as complete (87.5% overall)
+- `claude_code.py:529-534` - Added `--labels` argument to argument parser
+- `src/github_integration.py:74-159` - Updated `get_buildable_issues()` and `get_next_buildable_issue()` to accept `required_labels` parameter with case-insensitive matching
+- `.github/workflows/issue-poller.yml:165-218` - Added `ISSUE_LABELS` repository variable support for filtering issues
+- `CLAUDE.md:107-135` - Added Issue Label Filtering documentation section
 
-## 2. Quality (Tests 230 | Black Formatted | Docs Updated)
+**Created**:
+- `tests/test_github_integration.py` - 12 new tests for label filtering functionality
 
-**Tests**: 230 tests passing:
-- 17 new tests for CompletionSignalSettings
-- 12 tests for `from_dict()` / `to_dict()` / roundtrip
-- 5 tests for ProjectConfig integration
+## 2. Quality (Tests 242 | Security Clean | Docs Updated)
 
-**Code Quality**:
-- Black formatted
-- Ruff auto-fixed
-- All tests pass
+**Tests**: 242 passed (12 new for label filtering)
+- BuildableIssue to_dict conversion
+- Single and multiple label filtering
+- Case-insensitive matching
+- Whitespace handling
+- Building/complete issue exclusion
+- get_next_buildable_issue integration
 
-**Docs**: CLAUDE.md updated with:
-- Configuration JSON example
-- Settings table with defaults
-- Detection logic explanation
-- Custom signal examples
+**Quality**: Black formatted, Ruff auto-fixed
 
-## 3. Acceptance Criteria Verification
+## 3. Decisions
+
+**Case-insensitive matching**: Chosen for user-friendliness - "Feature" matches "feature"
+**ALL labels required**: Issues must have ALL specified labels, not just one (AND logic, not OR)
+**Repository variable for workflow**: Used `ISSUE_LABELS` variable instead of hardcoding, allowing runtime configuration
+
+## 4. Acceptance Criteria Verification
 
 | Criterion | Status | Implementation |
 |-----------|--------|---------------|
-| Completion signal configurable in .claude-code.json | ✅ | `completion_signal` object with `signal`, `emoji`, `complete_phrase`, `finished_phrase` |
-| Default remains current emoji string | ✅ | `DEFAULT_COMPLETION_SIGNAL` constant used when no config |
-| Signal can be plain text or include emoji | ✅ | Emoji auto-extracted from signal if not explicit |
-| Signal documented in CLAUDE.md | ✅ | Full section with examples and settings table |
-| bedrock_entrypoint.py reads signal from config | ✅ | N/A - bedrock_entrypoint.py uses agent_state.json pause state, not text parsing |
-
-## 4. Configuration Schema
-
-```json
-{
-  "completion_signal": {
-    "signal": "🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED",
-    "emoji": "🎉",
-    "complete_phrase": "implementation complete",
-    "finished_phrase": "all tasks finished"
-  }
-}
-```
-
-**Detection Logic**: All three must be present:
-1. Emoji character
-2. `complete_phrase` (case-insensitive)
-3. `finished_phrase` (case-insensitive)
+| --labels flag added to argument parser | ✅ | `claude_code.py:529-534` |
+| Multiple labels supported (comma-separated) | ✅ | Split on comma, strip whitespace |
+| Issues without matching labels are skipped | ✅ | `get_buildable_issues()` filters before approval check |
+| Label filter works with issue-poller workflow | ✅ | `ISSUE_LABELS` env var in workflow |
+| Default behavior unchanged when no labels specified | ✅ | `None` or `[]` returns all approved issues |
 
 ## 5. Handoff
 

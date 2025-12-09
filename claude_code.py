@@ -526,6 +526,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Skip git initialization (used when bedrock_entrypoint.py handles git setup)",
     )
 
+    parser.add_argument(
+        "--labels",
+        type=str,
+        help="Filter GitHub issues by labels (comma-separated). Only issues with ALL specified labels will be picked up.",
+        metavar="LABELS",
+    )
+
     return parser.parse_args()
 
 
