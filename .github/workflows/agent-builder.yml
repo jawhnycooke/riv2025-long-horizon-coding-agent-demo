@@ -189,6 +189,35 @@ jobs:
 
           EOF
 
+      # F020: Write job summary for visibility
+      - name: Write job summary
+        if: always()
+        env:
+          SHOULD_BUILD: ${{ steps.check.outputs.should_build }}
+          SHOULD_INVOKE: ${{ steps.check.outputs.should_invoke }}
+          ISSUE_NUMBER: ${{ steps.check.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.check.outputs.issue_title }}
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOFSUM'
+          ## Agent Build Check Results
+
+          | Field | Value |
+          |-------|-------|
+          EOFSUM
+
+          echo "| Issue | #${ISSUE_NUMBER:-N/A} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Title | ${ISSUE_TITLE:-N/A} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Should Build | ${SHOULD_BUILD:-false} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Should Invoke | ${SHOULD_INVOKE:-false} |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$SHOULD_BUILD" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":white_check_mark: Issue approved and ready for build" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":x: Issue not approved or already building" >> $GITHUB_STEP_SUMMARY
+          fi
+
   # Acquire a global lock to prevent race conditions
   # Only one workflow can be in this job at a time across ALL issues
   # F007: Added jitter, timeout detection, stale lock release, and status outputs
@@ -208,6 +237,10 @@ jobs:
       lock_holder_issue: ${{ steps.acquire.outputs.lock_holder_issue }}
 
     steps:
+      # F020: Checkout to access shared scripts
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       # F007: Add jitter before lock acquisition to reduce thundering herd
       - name: Apply lock acquisition jitter
         id: jitter
@@ -317,6 +350,28 @@ jobs:
           echo "lock_acquired=true" >> $GITHUB_OUTPUT
           echo "label_set=true" >> $GITHUB_OUTPUT
           echo "lock_holder_issue=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+
+      # F020: Write lock acquisition summary
+      - name: Write lock summary
+        if: always()
+        env:
+          LOCK_ACQUIRED: ${{ steps.acquire.outputs.lock_acquired }}
+          LOCK_AGE: ${{ steps.acquire.outputs.lock_age_seconds }}
+          STALE_RELEASED: ${{ steps.acquire.outputs.stale_lock_released }}
+          LOCK_HOLDER: ${{ steps.acquire.outputs.lock_holder_issue }}
+          JITTER: ${{ steps.jitter.outputs.jitter_seconds }}
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOFSUM
+          ## Lock Acquisition Results
+
+          | Field | Value |
+          |-------|-------|
+          | Jitter Applied | ${JITTER:-0}s |
+          | Lock Acquired | ${LOCK_ACQUIRED:-false} |
+          | Lock Holder | #${LOCK_HOLDER:-N/A} |
+          | Lock Age | ${LOCK_AGE:-0}s |
+          | Stale Lock Released | ${STALE_RELEASED:-false} |
+          EOFSUM
 
   # Post comment about build status
   # Label is set atomically in acquire-runtime-lock for should_invoke=true cases

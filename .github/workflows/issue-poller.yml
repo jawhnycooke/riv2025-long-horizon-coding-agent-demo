@@ -162,6 +162,27 @@ jobs:
 
           echo "✅ Triggered agent-builder with resume_session=true"
 
+      # F020: Write session health summary
+      - name: Write job summary
+        if: always()
+        env:
+          SESSION_STATUS: ${{ steps.health.outputs.status }}
+          NEEDS_RESTART: ${{ steps.health.outputs.needs_restart }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          SHOULD_RESTART: ${{ steps.verify.outputs.should_restart }}
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOFSUM'
+          ## Session Health Check Results
+
+          | Field | Value |
+          |-------|-------|
+          EOFSUM
+
+          echo "| Session Status | ${SESSION_STATUS:-unknown} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Needs Restart | ${NEEDS_RESTART:-false} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Issue Number | #${ISSUE_NUMBER:-N/A} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Should Restart | ${SHOULD_RESTART:-N/A} |" >> $GITHUB_STEP_SUMMARY
+
   # Job 2: Poll for new approved issues
   poll-and-trigger:
     runs-on: ubuntu-latest
@@ -294,4 +315,29 @@ jobs:
               -f force_rebuild=false
 
             echo "✅ Triggered agent-builder for issue #$FIRST_ISSUE"
+          fi
+
+      # F020: Write job summary
+      - name: Write job summary
+        if: always()
+        env:
+          HAS_ISSUES: ${{ steps.poll.outputs.has_issues }}
+          APPROVED_ISSUES: ${{ steps.poll.outputs.approved_issues }}
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOFSUM'
+          ## Issue Poller Results
+
+          EOFSUM
+
+          if [ "$HAS_ISSUES" = "true" ]; then
+            echo "**Status:** :white_check_mark: Found approved issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Approved Issues:** $APPROVED_ISSUES" >> $GITHUB_STEP_SUMMARY
+            FIRST=$(echo "$APPROVED_ISSUES" | jq -r '.[0] // empty')
+            if [ -n "$FIRST" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Triggered Build:** Issue #$FIRST" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "**Status:** :zzz: No approved issues found" >> $GITHUB_STEP_SUMMARY
           fi
