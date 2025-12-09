@@ -11,10 +11,10 @@ Key features:
 - Structured data with tool name, input, outcome
 """
 
+import contextlib
 import json
 import logging
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -116,7 +116,7 @@ class AuditLogger:
             return
 
         event = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "event_type": event_type.value,
             "tool_name": tool_name,
             "input": self._sanitize_input(input_data),
@@ -126,11 +126,9 @@ class AuditLogger:
         if details:
             event["details"] = details
 
-        try:
+        # Don't let audit logging failures break the agent
+        with contextlib.suppress(Exception):
             self._logger.info(json.dumps(event, default=str))
-        except Exception:
-            # Don't let audit logging failures break the agent
-            pass
 
     def _sanitize_input(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Sanitize input data to avoid logging sensitive information.
@@ -171,8 +169,14 @@ class AuditLogger:
             blocked: Whether the command was blocked
             reason: Reason for blocking (if blocked)
         """
-        event_type = AuditEventType.BASH_BLOCKED if blocked else AuditEventType.BASH_COMMAND
-        outcome = "blocked" if blocked else ("success" if exit_code == 0 else f"exit_{exit_code}")
+        event_type = (
+            AuditEventType.BASH_BLOCKED if blocked else AuditEventType.BASH_COMMAND
+        )
+        outcome = (
+            "blocked"
+            if blocked
+            else ("success" if exit_code == 0 else f"exit_{exit_code}")
+        )
 
         details: dict[str, Any] = {}
         if exit_code is not None:

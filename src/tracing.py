@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any
+
 
 if TYPE_CHECKING:
     from .config import TracingSettings
@@ -102,9 +104,7 @@ class TracingManager:
         try:
             # Get service name
             service_name = (
-                self._settings.service_name
-                if self._settings
-                else "claude-code-agent"
+                self._settings.service_name if self._settings else "claude-code-agent"
             )
 
             # Create resource with service name
@@ -114,9 +114,7 @@ class TracingManager:
             provider = TracerProvider(resource=resource)
 
             # Configure exporter based on settings
-            exporter_type = (
-                self._settings.exporter if self._settings else "console"
-            )
+            exporter_type = self._settings.exporter if self._settings else "console"
 
             if exporter_type == "console":
                 processor = SimpleSpanProcessor(ConsoleSpanExporter())
@@ -137,9 +135,7 @@ class TracingManager:
                     processor = BatchSpanProcessor(exporter)
                     provider.add_span_processor(processor)
                 except ImportError:
-                    print(
-                        "OTLP exporter not available, falling back to console"
-                    )
+                    print("OTLP exporter not available, falling back to console")
                     processor = SimpleSpanProcessor(ConsoleSpanExporter())
                     provider.add_span_processor(processor)
             # "none" exporter means no span output (just in-memory tracing)
@@ -254,7 +250,7 @@ class ToolCallTracer:
         self._span: Any = None
         self._start_time: float = 0
 
-    def __enter__(self) -> "ToolCallTracer":
+    def __enter__(self) -> ToolCallTracer:
         """Enter the context manager and start the span."""
         self._start_time = time.time()
 

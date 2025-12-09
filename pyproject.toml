@@ -205,7 +205,7 @@ fixable = ["ALL"]
 unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ARG001", "S101"]  # Allow assert and unused args in tests
+"tests/*" = ["ARG001", "ARG002", "S101"]  # Allow assert and unused args in tests (fixtures)
 "__init__.py" = ["F401", "F403"]  # Allow unused imports and star imports in __init__
 "bedrock_entrypoint.py" = ["B007", "RUF001"]  # Unused loop var, emoji in strings
 "src/github_integration.py" = ["ARG002", "SIM105", "SIM115"]  # Unused arg, suppress pattern, file handle

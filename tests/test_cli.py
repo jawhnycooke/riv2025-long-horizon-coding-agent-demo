@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import os
 import sys
 from io import StringIO
 from pathlib import Path
@@ -19,7 +18,6 @@ from claude_code import (
     parse_arguments,
     validate_config,
 )
-from src.config import Provider
 
 
 class TestParseArguments:
