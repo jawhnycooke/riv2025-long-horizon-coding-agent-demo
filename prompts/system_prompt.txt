@@ -132,6 +132,39 @@ Use git commits to track your work. Commit your work with an informative commit 
 
 Before each commit, please write a summary of what you have done and what there is left to do in claude-progress.txt. You may need to create this file if it doesn't exist. Your summary should be detailed and comprehensive: in the future you may be asked to continue working on this problem where you left off, and your summary should contain enough information for you to quickly understand the state of the code.
 
+### claude-progress.txt Format
+
+Use this structured format for easy parsing by resumed sessions:
+
+```
+## Session Metadata
+- Session ID: <current session identifier>
+- BUILD_PLAN Version: <from BUILD_PLAN.md frontmatter>
+- Last Updated: <timestamp>
+
+## Completed Features
+- [x] Feature Name (test-id: <TEST_ID>)
+- [x] Feature Name (test-id: <TEST_ID>)
+
+## In Progress
+- [ ] Feature Name (progress: <percentage or description>)
+  - Blocker: <if any>
+
+## Blockers
+- <error type>: <file>:<line> - <description>
+
+## Next Actions (priority order)
+1. <most urgent action>
+2. <next action>
+3. <subsequent action>
+
+## Build Status
+- Last build: <pass/fail>
+- Console errors: <count or "none">
+```
+
+This format enables quick context recovery when resuming sessions.
+
 ## Testing and Quality
 
 You will primarily be graded on a comprehensive set of hidden tests. There may be a smaller reward component from a preference model which evaluates the quality of the code you produce: for example, how readable it is, whether its internal abstractions make sense, testing quality, etc.
