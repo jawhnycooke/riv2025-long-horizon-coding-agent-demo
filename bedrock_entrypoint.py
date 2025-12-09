@@ -18,6 +18,17 @@ import os
 import subprocess
 import threading
 import time
+import logging
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
+
+# Subprocess timeout constants (in seconds)
+GIT_CONFIG_TIMEOUT = 30  # Short operations like git config
+GIT_OPERATION_TIMEOUT = 60  # Standard operations like add, commit, status
+GIT_CLONE_TIMEOUT = 300  # Clone can take longer for large repos
+GIT_PUSH_TIMEOUT = 120  # Push operations
+GIT_FETCH_TIMEOUT = 60  # Fetch operations
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -320,31 +331,43 @@ def scan_and_install_hooks(build_dir: Path, github_repo: str, branch_name: str) 
             print(f"🔍 Found new git repository at {repo_root}")
 
             # Set up git config for this repo
-            name_result = subprocess.run(
-                ["git", "config", "user.name", "Claude Code Agent"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-            )
-            if name_result.returncode != 0:
-                print(f"  ⚠️ Failed to set git user.name: {name_result.stderr}")
+            try:
+                name_result = subprocess.run(
+                    ["git", "config", "user.name", "Claude Code Agent"],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_CONFIG_TIMEOUT,
+                )
+                if name_result.returncode != 0:
+                    print(f"  ⚠️ Failed to set git user.name: {name_result.stderr}")
 
-            email_result = subprocess.run(
-                ["git", "config", "user.email", "agent@anthropic.com"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-            )
-            if email_result.returncode != 0:
-                print(f"  ⚠️ Failed to set git user.email: {email_result.stderr}")
+                email_result = subprocess.run(
+                    ["git", "config", "user.email", "agent@anthropic.com"],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_CONFIG_TIMEOUT,
+                )
+                if email_result.returncode != 0:
+                    print(f"  ⚠️ Failed to set git user.email: {email_result.stderr}")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Git config timed out for {repo_root}")
+                continue
 
             # Set up remote if not already configured
-            remote_result = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-            )
+            try:
+                remote_result = subprocess.run(
+                    ["git", "remote", "get-url", "origin"],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_CONFIG_TIMEOUT,
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Git remote get-url timed out for {repo_root}")
+                continue
+
             if remote_result.returncode != 0:
                 # No origin remote, add it
                 token = None
@@ -362,12 +385,16 @@ def scan_and_install_hooks(build_dir: Path, github_repo: str, branch_name: str) 
                     remote_url = (
                         f"https://x-access-token:{token}@github.com/{github_repo}.git"
                     )
-                    subprocess.run(
-                        ["git", "remote", "add", "origin", remote_url],
-                        cwd=repo_root,
-                        capture_output=True,
-                    )
-                    print(f"  Added origin remote for {repo_root}")
+                    try:
+                        subprocess.run(
+                            ["git", "remote", "add", "origin", remote_url],
+                            cwd=repo_root,
+                            capture_output=True,
+                            timeout=GIT_CONFIG_TIMEOUT,
+                        )
+                        print(f"  Added origin remote for {repo_root}")
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"Git remote add timed out for {repo_root}")
 
             # Install the hook
             if setup_post_commit_hook(repo_root, github_repo, branch_name):
@@ -497,13 +524,21 @@ def setup_agent_runtime(
             print(f"✅ Cloned {AGENT_BRANCH} branch")
 
         # Configure git user
-        subprocess.run(
-            ["git", "config", "user.name", "Claude Code Agent"], cwd=AGENT_RUNTIME_DIR
-        )
-        subprocess.run(
-            ["git", "config", "user.email", "agent@anthropic.com"],
-            cwd=AGENT_RUNTIME_DIR,
-        )
+        try:
+            subprocess.run(
+                ["git", "config", "user.name", "Claude Code Agent"],
+                cwd=AGENT_RUNTIME_DIR,
+                capture_output=True,
+                timeout=GIT_CONFIG_TIMEOUT,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "agent@anthropic.com"],
+                cwd=AGENT_RUNTIME_DIR,
+                capture_output=True,
+                timeout=GIT_CONFIG_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("Git config timed out during agent runtime setup")
 
     # Write token file for post-commit hook to use
     write_github_token_to_file(github_token)
@@ -817,11 +852,14 @@ def write_agent_state(
             cwd=workspace_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_CONFIG_TIMEOUT,
         )
         if result.returncode == 0:
             last_commit = result.stdout.strip()
-    except Exception:
-        pass
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Git rev-parse timed out for {workspace_dir}")
+    except OSError as e:
+        logger.warning(f"Git rev-parse failed: {e}")
 
     state = {
         "session_id": session_id,
@@ -1079,7 +1117,12 @@ def push_github_changes(
 
     try:
         # Stage all changes
-        subprocess.run(["git", "add", "-A"], cwd=build_dir, check=True)
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=build_dir,
+            check=True,
+            timeout=GIT_OPERATION_TIMEOUT,
+        )
 
         # Check if there are changes to commit
         result = subprocess.run(
@@ -1087,6 +1130,7 @@ def push_github_changes(
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
 
         if not result.stdout.strip():
@@ -1103,11 +1147,16 @@ def push_github_changes(
             ],
             cwd=build_dir,
             check=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
 
         # Get the commit SHA for tracking
         sha_result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=build_dir, capture_output=True, text=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=build_dir,
+            capture_output=True,
+            text=True,
+            timeout=GIT_CONFIG_TIMEOUT,
         )
         commit_sha = (
             sha_result.stdout.strip() if sha_result.returncode == 0 else "unknown"
@@ -1120,6 +1169,7 @@ def push_github_changes(
             ["git", "remote", "set-url", "origin", push_url],
             cwd=build_dir,
             capture_output=True,
+            timeout=GIT_CONFIG_TIMEOUT,
         )
 
         result = subprocess.run(
@@ -1127,6 +1177,7 @@ def push_github_changes(
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_PUSH_TIMEOUT,
         )
 
         if result.returncode == 0:
@@ -1138,6 +1189,7 @@ def push_github_changes(
                 cwd=build_dir,
                 capture_output=True,
                 text=True,
+                timeout=GIT_FETCH_TIMEOUT,
             )
             if verify_result.returncode == 0 and verify_result.stdout.strip():
                 remote_sha = verify_result.stdout.strip().split()[0]
@@ -1151,6 +1203,10 @@ def push_github_changes(
 
     except subprocess.CalledProcessError as e:
         print(f"❌ Git operation failed: {e}")
+        return False
+    except subprocess.TimeoutExpired as e:
+        print(f"❌ Git operation timed out: {e}")
+        logger.error(f"Git operation timed out in push_github_changes: {e}")
         return False
 
 
@@ -1176,6 +1232,7 @@ def create_wip_commit(
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
 
         if status_result.returncode != 0:
@@ -1189,7 +1246,11 @@ def create_wip_commit(
 
         # Stage all changes
         add_result = subprocess.run(
-            ["git", "add", "-A"], cwd=build_dir, capture_output=True, text=True
+            ["git", "add", "-A"],
+            cwd=build_dir,
+            capture_output=True,
+            text=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
 
         if add_result.returncode != 0:
@@ -1216,6 +1277,7 @@ Resume by checking:
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
 
         if commit_result.returncode != 0:
@@ -1230,6 +1292,7 @@ Resume by checking:
             ["git", "remote", "set-url", "origin", push_url],
             cwd=build_dir,
             capture_output=True,
+            timeout=GIT_CONFIG_TIMEOUT,
         )
 
         push_result = subprocess.run(
@@ -1237,6 +1300,7 @@ Resume by checking:
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_PUSH_TIMEOUT,
         )
 
         if push_result.returncode != 0:
@@ -1246,8 +1310,13 @@ Resume by checking:
         print(f"✅ WIP commit pushed to {branch_name}")
         return True
 
-    except Exception as e:
-        print(f"⚠️ Error creating WIP commit: {e}")
+    except subprocess.TimeoutExpired as e:
+        print(f"⚠️ Git operation timed out in WIP commit: {e}")
+        logger.error(f"Git operation timed out in create_wip_commit: {e}")
+        return False
+    except OSError as e:
+        print(f"⚠️ OS error creating WIP commit: {e}")
+        logger.error(f"OS error in create_wip_commit: {e}")
         return False
 
 
@@ -1262,7 +1331,11 @@ def push_pending_commits(
     try:
         # Log HEAD SHA for tracking
         head_result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=build_dir, capture_output=True, text=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=build_dir,
+            capture_output=True,
+            text=True,
+            timeout=GIT_CONFIG_TIMEOUT,
         )
         head_sha = (
             head_result.stdout.strip() if head_result.returncode == 0 else "unknown"
@@ -1275,11 +1348,16 @@ def push_pending_commits(
             ["git", "remote", "set-url", "origin", push_url],
             cwd=build_dir,
             capture_output=True,
+            timeout=GIT_CONFIG_TIMEOUT,
         )
 
         # Fetch to update our local view of remote refs
         fetch_result = subprocess.run(
-            ["git", "fetch", "origin"], cwd=build_dir, capture_output=True, text=True
+            ["git", "fetch", "origin"],
+            cwd=build_dir,
+            capture_output=True,
+            text=True,
+            timeout=GIT_FETCH_TIMEOUT,
         )
         if fetch_result.returncode != 0:
             print(f"⚠️ Fetch warning: {fetch_result.stderr}")
@@ -1290,6 +1368,7 @@ def push_pending_commits(
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
 
         # Handle case where remote branch doesn't exist yet
@@ -1300,6 +1379,7 @@ def push_pending_commits(
                 cwd=build_dir,
                 capture_output=True,
                 text=True,
+                timeout=GIT_OPERATION_TIMEOUT,
             )
             if result.returncode != 0 or not result.stdout.strip():
                 return True, 0, []  # No commits yet
@@ -1320,6 +1400,7 @@ def push_pending_commits(
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
         if log_result.returncode == 0 and log_result.stdout.strip():
             print(f"📤 Commits to push:\n{log_result.stdout.strip()}")
@@ -1330,6 +1411,7 @@ def push_pending_commits(
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_OPERATION_TIMEOUT,
         )
         pushed_shas = (
             sha_result.stdout.strip().split("\n") if sha_result.returncode == 0 else []
@@ -1341,6 +1423,7 @@ def push_pending_commits(
             cwd=build_dir,
             capture_output=True,
             text=True,
+            timeout=GIT_PUSH_TIMEOUT,
         )
 
         if result.returncode == 0:
@@ -1354,6 +1437,7 @@ def push_pending_commits(
                 cwd=build_dir,
                 capture_output=True,
                 text=True,
+                timeout=GIT_FETCH_TIMEOUT,
             )
             if verify_result.returncode == 0 and verify_result.stdout.strip():
                 remote_sha = verify_result.stdout.strip().split()[0]
@@ -1368,8 +1452,18 @@ def push_pending_commits(
             print(f"   stdout: {result.stdout}")
             return False, 0, []
 
-    except Exception as e:
-        print(f"⚠️ Error pushing commits: {e}")
+    except subprocess.TimeoutExpired as e:
+        print(f"⚠️ Git operation timed out: {e}")
+        logger.error(f"Git operation timed out in push_pending_commits: {e}")
+        return False, 0, []
+    except OSError as e:
+        print(f"⚠️ OS error pushing commits: {e}")
+        logger.error(f"OS error in push_pending_commits: {e}")
+        return False, 0, []
+    except ValueError as e:
+        # Handle case where commit_count can't be converted to int
+        print(f"⚠️ Error parsing commit count: {e}")
+        logger.error(f"Error parsing commit count in push_pending_commits: {e}")
         return False, 0, []
 
 
@@ -1613,13 +1707,18 @@ def post_commits_to_issue(
         for sha in new_shas:
             # Try to get the commit message
             if build_dir:
-                msg_result = subprocess.run(
-                    ["git", "log", "--format=%s", "-n", "1", sha],
-                    cwd=build_dir,
-                    capture_output=True,
-                    text=True,
-                )
-                msg = msg_result.stdout.strip() if msg_result.returncode == 0 else ""
+                try:
+                    msg_result = subprocess.run(
+                        ["git", "log", "--format=%s", "-n", "1", sha],
+                        cwd=build_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=GIT_CONFIG_TIMEOUT,
+                    )
+                    msg = msg_result.stdout.strip() if msg_result.returncode == 0 else ""
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Git log timed out for SHA {sha[:12]}")
+                    msg = ""
             else:
                 msg = ""
 

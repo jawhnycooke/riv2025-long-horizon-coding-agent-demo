@@ -13,6 +13,7 @@ Key responsibilities:
 """
 
 import builtins
+import logging
 import os
 import shutil
 import subprocess
@@ -22,12 +23,31 @@ from pathlib import Path
 from typing import Literal
 
 
+# Configure logger
+logger = logging.getLogger(__name__)
+
 # Constants
 GIT_USER_NAME = "Claude Code Agent"
 GIT_USER_EMAIL = "agent@anthropic.com"
 GITHUB_TOKEN_FILE = "/tmp/github_token"
 COMMITS_QUEUE_FILE = "/tmp/commits_to_announce.txt"
 DEFAULT_NOTIFICATION_INTERVAL = 300  # 5 minutes
+
+# Timeout constants (in seconds)
+GIT_CONFIG_TIMEOUT = 30  # Short operations like git config
+GIT_OPERATION_TIMEOUT = 60  # Standard operations like add, commit
+GIT_CLONE_TIMEOUT = 300  # Clone can take longer for large repos
+GIT_PUSH_TIMEOUT = 120  # Push operations
+GIT_FETCH_TIMEOUT = 60  # Fetch operations
+
+
+class GitOperationError(Exception):
+    """Raised when a git operation fails."""
+
+    def __init__(self, message: str, stderr: str | None = None, returncode: int | None = None):
+        super().__init__(message)
+        self.stderr = stderr
+        self.returncode = returncode
 
 
 @dataclass
@@ -104,19 +124,37 @@ class GitManager:
 
         Args:
             repo_path: Path to git repo (defaults to work_dir)
+
+        Raises:
+            GitOperationError: If git config fails
+            subprocess.TimeoutExpired: If operation times out
         """
         path = repo_path or self.work_dir
 
-        subprocess.run(
-            ["git", "config", "user.name", GIT_USER_NAME],
-            cwd=path,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.email", GIT_USER_EMAIL],
-            cwd=path,
-            capture_output=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "config", "user.name", GIT_USER_NAME],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=GIT_CONFIG_TIMEOUT,
+            )
+            if result.returncode != 0:
+                logger.warning(f"Failed to set git user.name: {result.stderr}")
+
+            result = subprocess.run(
+                ["git", "config", "user.email", GIT_USER_EMAIL],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=GIT_CONFIG_TIMEOUT,
+            )
+            if result.returncode != 0:
+                logger.warning(f"Failed to set git user.email: {result.stderr}")
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Git config timed out after {GIT_CONFIG_TIMEOUT}s")
+            raise
 
     def is_inside_git_repo(self, path: Path | None = None) -> bool:
         """Check if path is inside an existing git repository.
@@ -129,14 +167,21 @@ class GitManager:
         """
         check_path = path or self.work_dir
 
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=check_path,
-            capture_output=True,
-            text=True,
-        )
-
-        return result.returncode == 0 and result.stdout.strip() == "true"
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=check_path,
+                capture_output=True,
+                text=True,
+                timeout=GIT_CONFIG_TIMEOUT,
+            )
+            return result.returncode == 0 and result.stdout.strip() == "true"
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Git rev-parse timed out after {GIT_CONFIG_TIMEOUT}s")
+            return False
+        except OSError as e:
+            logger.warning(f"Git rev-parse failed: {e}")
+            return False
 
     def initialize_repo(self) -> None:
         """Initialize git repository for local mode.
@@ -144,38 +189,93 @@ class GitManager:
         If already inside a git repo (e.g., GitHub mode), skips git init
         to avoid creating a nested repo. Still does initial commit for
         template files.
+
+        Raises:
+            GitOperationError: If critical git operations fail
+            subprocess.TimeoutExpired: If operation times out
         """
-        if self.is_inside_git_repo():
-            builtins.print("📁 Already inside a git repository - skipping git init")
-            # Still add and commit template files to the existing repo
-            subprocess.run(["git", "add", "."], cwd=self.work_dir)
-            subprocess.run(
-                ["git", "commit", "-m", "Add generated code template", "--allow-empty"],
-                cwd=self.work_dir,
-            )
-        else:
-            builtins.print("🔧 Initializing git repository")
-            subprocess.run(["git", "init"], cwd=self.work_dir)
-            subprocess.run(["git", "add", "."], cwd=self.work_dir)
-            subprocess.run(
-                [
-                    "git",
-                    "commit",
-                    "-m",
-                    "Initial template from frontend-scaffold-template",
-                ],
-                cwd=self.work_dir,
-            )
+        try:
+            if self.is_inside_git_repo():
+                builtins.print("📁 Already inside a git repository - skipping git init")
+                # Still add and commit template files to the existing repo
+                result = subprocess.run(
+                    ["git", "add", "."],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_OPERATION_TIMEOUT,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Git add failed: {result.stderr}")
 
-        # Configure git user
-        self.configure_git_user()
+                result = subprocess.run(
+                    ["git", "commit", "-m", "Add generated code template", "--allow-empty"],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_OPERATION_TIMEOUT,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Git commit failed: {result.stderr}")
+            else:
+                builtins.print("🔧 Initializing git repository")
+                result = subprocess.run(
+                    ["git", "init"],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_OPERATION_TIMEOUT,
+                )
+                if result.returncode != 0:
+                    raise GitOperationError(
+                        f"Failed to initialize git repository: {result.stderr}",
+                        stderr=result.stderr,
+                        returncode=result.returncode,
+                    )
 
-        # Set correct npm registry
-        builtins.print("📦 Setting the correct npm registry")
-        subprocess.run(
-            ["npm", "config", "set", "registry", "https://registry.npmjs.org"],
-            cwd=self.work_dir,
-        )
+                result = subprocess.run(
+                    ["git", "add", "."],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_OPERATION_TIMEOUT,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Git add failed: {result.stderr}")
+
+                result = subprocess.run(
+                    [
+                        "git",
+                        "commit",
+                        "-m",
+                        "Initial template from frontend-scaffold-template",
+                    ],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_OPERATION_TIMEOUT,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Git commit failed: {result.stderr}")
+
+            # Configure git user
+            self.configure_git_user()
+
+            # Set correct npm registry
+            builtins.print("📦 Setting the correct npm registry")
+            result = subprocess.run(
+                ["npm", "config", "set", "registry", "https://registry.npmjs.org"],
+                cwd=self.work_dir,
+                capture_output=True,
+                text=True,
+                timeout=GIT_CONFIG_TIMEOUT,
+            )
+            if result.returncode != 0:
+                logger.warning(f"npm config set registry failed: {result.stderr}")
+
+        except subprocess.TimeoutExpired as e:
+            logger.error(f"Git operation timed out: {e}")
+            raise
 
     def clone_repo(self, dest: Path) -> bool:
         """Clone GitHub repository to destination.
@@ -185,6 +285,10 @@ class GitManager:
 
         Returns:
             True if clone succeeded, False otherwise
+
+        Raises:
+            ValueError: If github_config is not set
+            subprocess.TimeoutExpired: If clone times out
         """
         if self.github_config is None:
             raise ValueError("clone_repo requires github_config")
@@ -196,30 +300,56 @@ class GitManager:
 
         builtins.print(f"📥 Cloning {self.github_config.repo}...")
 
-        result = subprocess.run(
-            ["git", "clone", self.github_config.clone_url, str(dest)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "clone", self.github_config.clone_url, str(dest)],
+                capture_output=True,
+                text=True,
+                timeout=GIT_CLONE_TIMEOUT,
+            )
 
-        if result.returncode != 0:
-            builtins.print(f"❌ Clone failed: {result.stderr}")
+            if result.returncode != 0:
+                builtins.print(f"❌ Clone failed: {result.stderr}")
+                logger.error(f"Git clone failed: {result.stderr}")
+                return False
+
+            builtins.print("✅ Repository cloned")
+            return True
+
+        except subprocess.TimeoutExpired:
+            builtins.print(f"❌ Clone timed out after {GIT_CLONE_TIMEOUT}s")
+            logger.error(f"Git clone timed out after {GIT_CLONE_TIMEOUT}s")
             return False
-
-        builtins.print("✅ Repository cloned")
-        return True
 
     def create_branch(self, branch_name: str) -> None:
         """Create and checkout a new branch.
 
         Args:
             branch_name: Name of the branch to create
+
+        Raises:
+            GitOperationError: If branch creation fails
+            subprocess.TimeoutExpired: If operation times out
         """
-        subprocess.run(
-            ["git", "checkout", "-b", branch_name],
-            cwd=self.work_dir,
-        )
-        builtins.print(f"✅ Created branch: {branch_name}")
+        try:
+            result = subprocess.run(
+                ["git", "checkout", "-b", branch_name],
+                cwd=self.work_dir,
+                capture_output=True,
+                text=True,
+                timeout=GIT_OPERATION_TIMEOUT,
+            )
+            if result.returncode != 0:
+                raise GitOperationError(
+                    f"Failed to create branch {branch_name}: {result.stderr}",
+                    stderr=result.stderr,
+                    returncode=result.returncode,
+                )
+            builtins.print(f"✅ Created branch: {branch_name}")
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Git checkout -b timed out after {GIT_OPERATION_TIMEOUT}s")
+            raise
 
     # =========================================================================
     # GitHub Mode Setup
@@ -389,21 +519,31 @@ exit 0
                 self.configure_git_user(repo_root)
 
                 # Set up remote if not already configured
-                remote_result = subprocess.run(
-                    ["git", "remote", "get-url", "origin"],
-                    cwd=repo_root,
-                    capture_output=True,
-                    text=True,
-                )
-                if remote_result.returncode != 0:
-                    # No origin remote, add it
-                    remote_url = f"https://x-access-token:{self.github_config.token}@github.com/{self.github_config.repo}.git"
-                    subprocess.run(
-                        ["git", "remote", "add", "origin", remote_url],
+                try:
+                    remote_result = subprocess.run(
+                        ["git", "remote", "get-url", "origin"],
                         cwd=repo_root,
                         capture_output=True,
+                        text=True,
+                        timeout=GIT_CONFIG_TIMEOUT,
                     )
-                    builtins.print(f"  Added origin remote for {repo_root}")
+                    if remote_result.returncode != 0:
+                        # No origin remote, add it
+                        remote_url = f"https://x-access-token:{self.github_config.token}@github.com/{self.github_config.repo}.git"
+                        result = subprocess.run(
+                            ["git", "remote", "add", "origin", remote_url],
+                            cwd=repo_root,
+                            capture_output=True,
+                            text=True,
+                            timeout=GIT_CONFIG_TIMEOUT,
+                        )
+                        if result.returncode != 0:
+                            logger.warning(f"Failed to add remote: {result.stderr}")
+                        else:
+                            builtins.print(f"  Added origin remote for {repo_root}")
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Git remote operation timed out for {repo_root}")
+                    continue
 
                 # Install hook
                 if self.install_post_commit_hook(repo_root):
@@ -412,8 +552,9 @@ exit 0
                 # Mark as processed
                 self._hooked_git_dirs.add(git_dir_str)
 
-        except Exception as e:
+        except OSError as e:
             builtins.print(f"⚠️ Error scanning for git repositories: {e}")
+            logger.error(f"Error scanning for git repositories: {e}")
 
         return hooks_installed
 
@@ -465,6 +606,7 @@ exit 0
                 cwd=self.work_dir,
                 capture_output=True,
                 text=True,
+                timeout=GIT_CONFIG_TIMEOUT,
             )
             head_sha = (
                 head_result.stdout.strip() if head_result.returncode == 0 else "unknown"
@@ -477,6 +619,8 @@ exit 0
                 ["git", "remote", "set-url", "origin", push_url],
                 cwd=self.work_dir,
                 capture_output=True,
+                text=True,
+                timeout=GIT_CONFIG_TIMEOUT,
             )
 
             # Fetch to update local view of remote refs
@@ -484,6 +628,8 @@ exit 0
                 ["git", "fetch", "origin"],
                 cwd=self.work_dir,
                 capture_output=True,
+                text=True,
+                timeout=GIT_FETCH_TIMEOUT,
             )
 
             # Check for unpushed commits
@@ -492,6 +638,7 @@ exit 0
                 cwd=self.work_dir,
                 capture_output=True,
                 text=True,
+                timeout=GIT_OPERATION_TIMEOUT,
             )
 
             # Handle case where remote branch doesn't exist yet
@@ -501,6 +648,7 @@ exit 0
                     cwd=self.work_dir,
                     capture_output=True,
                     text=True,
+                    timeout=GIT_OPERATION_TIMEOUT,
                 )
                 if result.returncode != 0 or not result.stdout.strip():
                     return True, 0, []
@@ -521,6 +669,7 @@ exit 0
                 cwd=self.work_dir,
                 capture_output=True,
                 text=True,
+                timeout=GIT_OPERATION_TIMEOUT,
             )
             pushed_shas = (
                 sha_result.stdout.strip().split("\n")
@@ -534,6 +683,7 @@ exit 0
                 cwd=self.work_dir,
                 capture_output=True,
                 text=True,
+                timeout=GIT_PUSH_TIMEOUT,
             )
 
             if result.returncode == 0:
@@ -544,10 +694,21 @@ exit 0
             else:
                 builtins.print(f"❌ Push FAILED to {branch_name}")
                 builtins.print(f"   stderr: {result.stderr}")
+                logger.error(f"Git push failed: {result.stderr}")
                 return False, 0, []
 
-        except Exception as e:
+        except subprocess.TimeoutExpired as e:
+            builtins.print(f"⚠️ Git operation timed out: {e}")
+            logger.error(f"Git push operation timed out: {e}")
+            return False, 0, []
+        except OSError as e:
             builtins.print(f"⚠️ Error pushing commits: {e}")
+            logger.error(f"Error pushing commits: {e}")
+            return False, 0, []
+        except ValueError as e:
+            # Handle case where commit_count can't be converted to int
+            builtins.print(f"⚠️ Error parsing commit count: {e}")
+            logger.error(f"Error parsing commit count: {e}")
             return False, 0, []
 
     # =========================================================================
