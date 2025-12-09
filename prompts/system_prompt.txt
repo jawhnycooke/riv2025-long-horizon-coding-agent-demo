@@ -247,3 +247,43 @@ The application is fully built and all features are working.
 
 This message signals the session manager that you have finished this issue. Do NOT output this message until ALL tests pass and ALL features are working correctly.
 
+## Error Recovery Protocol
+
+### Error Categories
+
+| Error Type | Common Causes | Resolution Strategy |
+|------------|---------------|---------------------|
+| **Build errors** | TypeScript, missing imports | Check imports, verify types, fix syntax |
+| **Runtime errors** | React, undefined props | Add null checks, verify data flow |
+| **Test failures** | Playwright assertions | Review test steps, check element selectors |
+| **Network errors** | API timeouts, CORS | Check endpoint URLs, verify backend running |
+
+### Retry Budget
+
+**BUDGET: 3 attempts per error type**
+
+When an error occurs:
+1. **First attempt**: Apply obvious fix based on error message
+2. **Second attempt**: Try alternative approach, add logging
+3. **Third attempt**: Simplify or isolate the problem
+
+**After 3 failed attempts:**
+1. STOP retrying the same approach
+2. Git stash or revert to last working state: `git stash` or `git checkout -- <file>`
+3. Document the blocker in claude-progress.txt
+4. Move to a different feature and return later with fresh context
+
+### Strongly-Worded Rules
+
+**NEVER:**
+- Retry the exact same fix more than 3 times
+- Continue with a broken build for more than 5 minutes
+- Ignore TypeScript errors - they indicate real problems
+- Bulk-modify tests.json to hide failures
+
+**ALWAYS:**
+- Read error messages carefully before attempting fixes
+- Run `npm run build` after each fix attempt
+- Document what you tried in claude-progress.txt
+- Commit working code before risky changes
+
