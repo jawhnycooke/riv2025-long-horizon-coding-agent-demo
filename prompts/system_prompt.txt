@@ -150,41 +150,43 @@ You have absolutely unlimited time, so in this session it's ok to implement only
 
 ## Test Verification (CRITICAL - ENFORCED BY SYSTEM)
 
-For EACH test in tests.json, you MUST follow this exact process:
+### QUICK REFERENCE - Use This ONE Command Per Test
 
-1. **Read the test steps** from tests.json
-2. **Execute the test** by performing the steps in the browser
-3. **Take a screenshot AND capture console output** using the playwright-test helper:
-   ```bash
-   node playwright-test.cjs --url http://localhost:6174 --test-id <TEST_ID> --output-dir screenshots/issue-$ISSUE_NUMBER --operation full
-   ```
+```bash
+node playwright-test.cjs --url http://localhost:6174 --test-id <TEST_ID> \
+  --output-dir screenshots/issue-$ISSUE_NUMBER --operation full
+```
 
-   This single command creates both:
-   - `screenshots/issue-$ISSUE_NUMBER/<TEST_ID>-<timestamp>.png` (screenshot)
-   - `screenshots/issue-$ISSUE_NUMBER/<TEST_ID>-console.txt` (console output)
+This creates BOTH files in one operation:
+- `<TEST_ID>-<timestamp>.png` (screenshot)
+- `<TEST_ID>-console.txt` (console output)
 
-   For pages with routes, include the path in the URL:
-   ```bash
-   node playwright-test.cjs --url http://localhost:6174/settings --test-id settings-v1 --output-dir screenshots/issue-$ISSUE_NUMBER --operation full
-   ```
+For routes: `--url http://localhost:6174/settings`
 
-4. **View the screenshot** using the Read tool to verify expected behavior
-5. **View the console log** using the Read tool to verify NO_CONSOLE_ERRORS
-6. **Fix any console errors** before proceeding - a test CANNOT pass with console errors
-7. **ONLY THEN** mark the test as passing using the Edit tool
+### Verification Process
 
-**THE SYSTEM WILL BLOCK YOUR EDIT IF:**
+For EACH test in tests.json:
+
+1. **Read test steps** from tests.json
+2. **Run the command above** with the test's ID
+3. **Read the screenshot** (verify expected behavior)
+4. **Read the console log** (must show `NO_CONSOLE_ERRORS`)
+5. **Fix any errors** before proceeding
+6. **Mark as passing** using the Edit tool
+
+### System Enforcement
+
+**YOUR EDIT WILL BE BLOCKED IF:**
 - No screenshot exists with the test ID in the filename
 - No console log file exists (`<TEST_ID>-console.txt`)
-- You haven't viewed (Read) both the screenshot AND console log
+- You haven't Read both the screenshot AND console log
 - The test ID cannot be determined from your edit
 
 **CRITICAL RULES:**
-- You MUST NOT bulk-update tests.json (sed/awk/jq/python/node are ALL BLOCKED)
-- You MUST take AND view BOTH screenshot AND console log for each test
+- NEVER bulk-update tests.json (sed/awk/jq/python/node are ALL BLOCKED)
+- ALWAYS use `--operation full` to capture both screenshot AND console
 - Console log MUST show `NO_CONSOLE_ERRORS` - fix any errors first!
-- Each test must have: `<TEST_ID>-*.png` AND `<TEST_ID>-console.txt`
-- If there are console errors, FIX THEM before marking the test as passing
+- Each test requires: `<TEST_ID>-*.png` AND `<TEST_ID>-console.txt`
 
 ### Advanced Testing with Playwright Test
 
