@@ -117,7 +117,7 @@ Expected output:
 ```json
 {
   "provider": "bedrock",
-  "model": "claude-sonnet-4-5-20250929",
+  "model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
   "bedrock": {
     "region": "us-east-1",
     "profile": "ClaudeCode"
@@ -170,7 +170,7 @@ Create `.claude-code.json` manually:
 cat > .claude-code.json << 'EOF'
 {
   "provider": "bedrock",
-  "model": "claude-sonnet-4-5-20250929",
+  "model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
   "bedrock": {
     "region": "us-east-1",
     "profile": null
@@ -212,9 +212,9 @@ For production on ECS Fargate:
 
 | Model | ID |
 |-------|-----|
-| Claude Opus 4.5 | `claude-opus-4-5-20251101` |
-| Claude Sonnet 4.5 | `claude-sonnet-4-5-20250929` |
-| Claude Haiku 4.5 | `claude-haiku-4-5-20250929` |
+| Claude Opus 4.5 | `global.anthropic.claude-opus-4-5-20251101-v1:0` |
+| Claude Sonnet 4.5 | `global.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| Claude Haiku 4.5 | `global.anthropic.claude-haiku-4-5-20250929-v1:0` |
 
 ## Troubleshooting
 
