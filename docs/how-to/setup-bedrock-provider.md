@@ -80,7 +80,7 @@ For ECS/EC2, attach an IAM role with Bedrock permissions. No credential configur
 ### 3. Run the Setup Wizard
 
 ```bash
-python install.py
+uv run python install.py
 ```
 
 Follow the prompts:
@@ -131,7 +131,7 @@ Expected output:
 ### 5. Validate Setup with Dry Run
 
 ```bash
-python claude_code.py --dry-run --project canopy
+uv run python claude_code.py --dry-run --project canopy
 ```
 
 **Success indicator**:
@@ -143,7 +143,7 @@ Dry run complete - configuration is valid
 ### 6. Run the Agent
 
 ```bash
-python claude_code.py --project canopy
+uv run python claude_code.py --project canopy
 ```
 
 The agent will now use AWS Bedrock for all Claude API calls.
@@ -156,10 +156,10 @@ Skip the setup wizard and override the provider directly:
 
 ```bash
 # Use Bedrock regardless of .claude-code.json
-python claude_code.py --project canopy --provider bedrock
+uv run python claude_code.py --project canopy --provider bedrock
 
 # Force Anthropic API instead
-python claude_code.py --project canopy --provider anthropic
+uv run python claude_code.py --project canopy --provider anthropic
 ```
 
 ### Manual Configuration
@@ -316,7 +316,7 @@ You've successfully configured the Claude Code Agent to use AWS Bedrock. The key
 
 1. Enable Claude model access in AWS Bedrock
 2. Configure AWS credentials (profile or IAM role)
-3. Run `python install.py` and select Bedrock
+3. Run `uv run python install.py` and select Bedrock
 4. Validate with `--dry-run` flag
 5. Run the agent
 
