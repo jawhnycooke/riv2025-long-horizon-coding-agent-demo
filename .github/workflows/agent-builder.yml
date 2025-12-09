@@ -190,6 +190,7 @@ jobs:
 
   # Acquire a global lock to prevent race conditions
   # Only one workflow can be in this job at a time across ALL issues
+  # F007: Added jitter, timeout detection, stale lock release, and status outputs
   acquire-runtime-lock:
     needs: check-approval
     if: needs.check-approval.outputs.should_build == 'true' && needs.check-approval.outputs.should_invoke == 'true'
@@ -200,16 +201,36 @@ jobs:
       cancel-in-progress: false
     outputs:
       lock_acquired: ${{ steps.acquire.outputs.lock_acquired }}
+      lock_age_seconds: ${{ steps.acquire.outputs.lock_age_seconds }}
+      stale_lock_released: ${{ steps.acquire.outputs.stale_lock_released }}
+      lock_holder_issue: ${{ steps.acquire.outputs.lock_holder_issue }}
 
     steps:
+      # F007: Add jitter before lock acquisition to reduce thundering herd
+      - name: Apply lock acquisition jitter
+        id: jitter
+        run: |
+          # Random delay between 0-5 seconds to stagger concurrent requests
+          JITTER=$((RANDOM % 6))
+          echo "⏳ Waiting ${JITTER}s before lock acquisition (jitter)"
+          echo "jitter_seconds=$JITTER" >> $GITHUB_OUTPUT
+          sleep $JITTER
+
       - name: Acquire runtime lock and set label atomically
         id: acquire
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ needs.check-approval.outputs.issue_number }}
+          # F007: Configurable lock timeout (default 10 minutes = 600 seconds)
+          LOCK_TIMEOUT_SECONDS: ${{ vars.LOCK_TIMEOUT_SECONDS || '600' }}
         run: |
           # CRITICAL: Check for label AND set label atomically while holding the global lock
           # This prevents race condition where two workflows both pass the check before either sets label
+
+          # Initialize outputs
+          echo "lock_age_seconds=0" >> $GITHUB_OUTPUT
+          echo "stale_lock_released=false" >> $GITHUB_OUTPUT
+          echo "lock_holder_issue=" >> $GITHUB_OUTPUT
 
           # Re-check if any other issue has agent-building label NOW (inside the lock)
           BUILDING_ISSUES=$(gh api repos/$GITHUB_REPOSITORY/issues \
@@ -220,22 +241,80 @@ jobs:
             # Check if any building issue is NOT our issue
             for ISSUE in $BUILDING_ISSUES; do
               if [ "$ISSUE" != "$ISSUE_NUMBER" ]; then
-                echo "Another issue #$ISSUE is already building (detected inside lock)"
-                echo "The running agent will pick up issue #$ISSUE_NUMBER automatically"
-                echo "lock_acquired=false" >> $GITHUB_OUTPUT
-                echo "label_set=false" >> $GITHUB_OUTPUT
-                exit 0
+                echo "lock_holder_issue=$ISSUE" >> $GITHUB_OUTPUT
+
+                # F007: Check lock age and release if stale
+                echo "🔍 Checking lock age for issue #$ISSUE..."
+
+                # Get the timestamp when agent-building label was added
+                # Query issue events to find when the label was added
+                LABEL_ADDED_AT=$(gh api repos/$GITHUB_REPOSITORY/issues/$ISSUE/events \
+                  --jq '[.[] | select(.event == "labeled" and .label.name == "agent-building")] | last | .created_at' \
+                  2>/dev/null || echo "")
+
+                if [ -n "$LABEL_ADDED_AT" ] && [ "$LABEL_ADDED_AT" != "null" ]; then
+                  # Calculate lock age in seconds
+                  LABEL_EPOCH=$(date -d "$LABEL_ADDED_AT" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$LABEL_ADDED_AT" +%s 2>/dev/null || echo "0")
+                  NOW_EPOCH=$(date +%s)
+                  LOCK_AGE=$((NOW_EPOCH - LABEL_EPOCH))
+
+                  echo "lock_age_seconds=$LOCK_AGE" >> $GITHUB_OUTPUT
+                  echo "📊 Lock held by issue #$ISSUE for ${LOCK_AGE}s (timeout: ${LOCK_TIMEOUT_SECONDS}s)"
+
+                  # F007: Release stale lock if timeout exceeded
+                  if [ "$LOCK_AGE" -gt "$LOCK_TIMEOUT_SECONDS" ]; then
+                    echo "⚠️ Stale lock detected (${LOCK_AGE}s > ${LOCK_TIMEOUT_SECONDS}s timeout)"
+                    echo "🔓 Releasing stale lock from issue #$ISSUE..."
+
+                    # Remove the agent-building label from the stale issue
+                    gh issue edit $ISSUE --remove-label "agent-building" --repo $GITHUB_REPOSITORY
+
+                    # Add a comment explaining why the lock was released
+                    gh issue comment $ISSUE --repo $GITHUB_REPOSITORY --body "⚠️ **Stale Lock Released**
+
+          The agent-building lock was held for ${LOCK_AGE} seconds, exceeding the timeout of ${LOCK_TIMEOUT_SECONDS} seconds.
+
+          The lock has been released to allow other issues to be processed.
+
+          **Possible causes:**
+          - Agent session crashed or timed out
+          - CloudWatch heartbeat stopped
+          - Network connectivity issues
+
+          To restart this build, add a 🚀 reaction again or use \`resume_session=true\` in the workflow."
+
+                    echo "stale_lock_released=true" >> $GITHUB_OUTPUT
+                    echo "✅ Stale lock released from issue #$ISSUE"
+
+                    # Continue to acquire the lock for our issue
+                  else
+                    echo "Another issue #$ISSUE is already building (lock age: ${LOCK_AGE}s)"
+                    echo "The running agent will pick up issue #$ISSUE_NUMBER automatically"
+                    echo "lock_acquired=false" >> $GITHUB_OUTPUT
+                    echo "label_set=false" >> $GITHUB_OUTPUT
+                    exit 0
+                  fi
+                else
+                  # Can't determine lock age, assume it's valid
+                  echo "⚠️ Could not determine lock age for issue #$ISSUE"
+                  echo "Another issue #$ISSUE is already building (detected inside lock)"
+                  echo "The running agent will pick up issue #$ISSUE_NUMBER automatically"
+                  echo "lock_acquired=false" >> $GITHUB_OUTPUT
+                  echo "label_set=false" >> $GITHUB_OUTPUT
+                  exit 0
+                fi
               fi
             done
           fi
 
-          # No other issue is building - SET THE LABEL NOW while we hold the lock
+          # No other issue is building (or stale lock was released) - SET THE LABEL NOW while we hold the lock
           # This is the atomic operation that prevents races
-          echo "Lock acquired - setting agent-building label while holding lock"
+          echo "🔒 Lock acquired - setting agent-building label while holding lock"
           gh issue edit $ISSUE_NUMBER --add-label "agent-building" --repo $GITHUB_REPOSITORY
 
           echo "lock_acquired=true" >> $GITHUB_OUTPUT
           echo "label_set=true" >> $GITHUB_OUTPUT
+          echo "lock_holder_issue=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
 
   # Post comment about build status
   # Label is set atomically in acquire-runtime-lock for should_invoke=true cases
@@ -257,15 +336,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ needs.check-approval.outputs.issue_number }}
           SHOULD_INVOKE: ${{ needs.check-approval.outputs.should_invoke }}
+          # F007: Include lock status information
+          STALE_LOCK_RELEASED: ${{ needs.acquire-runtime-lock.outputs.stale_lock_released || 'false' }}
+          LOCK_AGE_SECONDS: ${{ needs.acquire-runtime-lock.outputs.lock_age_seconds || '0' }}
+          LOCK_HOLDER_ISSUE: ${{ needs.acquire-runtime-lock.outputs.lock_holder_issue || '' }}
         run: |
           # Add comment depending on whether we're starting a new session or queuing
           if [ "$SHOULD_INVOKE" = "true" ]; then
             # Label already set in acquire-runtime-lock (atomically while holding lock)
+
+            # F007: Include stale lock release info if applicable
+            if [ "$STALE_LOCK_RELEASED" = "true" ]; then
+              LOCK_INFO="
+          > ⚠️ **Note:** A stale lock from issue #${LOCK_HOLDER_ISSUE} (held for ${LOCK_AGE_SECONDS}s) was automatically released.
+          "
+            else
+              LOCK_INFO=""
+            fi
+
             gh issue comment $ISSUE_NUMBER --repo $GITHUB_REPOSITORY --body "🤖 **Agent Build Started**
 
           Workflow: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           Started: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
+          Lock timeout: \${{ vars.LOCK_TIMEOUT_SECONDS || '600' }}s
+          ${LOCK_INFO}
           The agent is now building this feature. Progress will be posted here.
 
           Commits will be pushed to branch \`agent-runtime\`."

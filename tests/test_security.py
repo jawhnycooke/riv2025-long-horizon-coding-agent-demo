@@ -1,8 +1,6 @@
 """Tests for src/security.py - Security validation hooks and utilities."""
 
-import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -118,12 +116,12 @@ class TestPathValidation:
             file_path, str(project_root)
         )
         assert not is_valid
-        assert "outside the allowed directory" in error
+        assert "outside the allowed project directory" in error
 
     def test_path_with_traversal(self, project_root: Path) -> None:
         """Reject paths with traversal attempts."""
         file_path = str(project_root / ".." / "secret.txt")
-        is_valid, error = SecurityValidator._validate_path_within_run_directory(
+        is_valid, _error = SecurityValidator._validate_path_within_run_directory(
             file_path, str(project_root)
         )
         assert not is_valid

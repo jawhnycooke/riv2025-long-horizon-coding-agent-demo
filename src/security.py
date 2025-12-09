@@ -15,6 +15,7 @@ from .config import (
     BLOCKED_SED_PATTERNS,
     BLOCKED_TESTS_JSON_PATTERNS,
 )
+from .error_messages import SecurityErrorMessages
 
 
 # ============================================================================
@@ -113,19 +114,20 @@ class SecurityValidator:
 
     @staticmethod
     def _validate_path_within_run_directory(
-        file_path: str, project_root: str | None
+        file_path: str, project_root: str | None, tool_name: str = "operation"
     ) -> tuple[bool, str]:
         """Validate that a path is within the run-specific directory.
 
         Args:
             file_path: Path to validate
             project_root: Project root directory (run-specific directory)
+            tool_name: Name of the tool requesting validation (for error messages)
 
         Returns:
             Tuple of (is_valid, error_reason)
         """
         if not project_root:
-            return False, "No project root directory set"
+            return False, SecurityErrorMessages.no_project_root()
 
         try:
             # Resolve absolute paths to handle relative paths and symlinks
@@ -140,7 +142,9 @@ class SecurityValidator:
                 # Path is outside project root
                 return (
                     False,
-                    f"Path '{file_path}' is outside the allowed directory '{project_root}'",
+                    SecurityErrorMessages.path_outside_project(
+                        file_path, project_root, tool_name
+                    ),
                 )
 
         except (OSError, RuntimeError) as e:
@@ -351,17 +355,12 @@ class SecurityValidator:
         if first_word == "git":
             tokens = command.strip().split()
             if len(tokens) >= 2 and tokens[1] == "init":
+                error_msg = SecurityErrorMessages.git_init_blocked()
                 print("🚨 BLOCKED: git init - use the existing repository")
                 get_audit_logger().log_bash_command(
                     command, blocked=True, reason="git init not allowed"
                 )
-                return {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": "git init is not allowed. The infrastructure handles git setup. Use 'git add' and 'git commit' to commit your changes to the existing repository.",
-                    }
-                }
+                return _deny_response(error_msg)
 
         # Check if command is in allowed list
         if first_word in ALLOWED_BASH_COMMANDS:
@@ -370,6 +369,9 @@ class SecurityValidator:
             get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
+            error_msg = SecurityErrorMessages.command_not_allowed(
+                command, first_word, list(ALLOWED_BASH_COMMANDS)
+            )
             print(f"🚨 BLOCKED: {command}")
             # Audit log blocked command
             get_audit_logger().log_bash_command(
@@ -377,13 +379,7 @@ class SecurityValidator:
                 blocked=True,
                 reason=f"Command '{first_word}' not in allowed list",
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": f"Command '{first_word}' not allowed. Permitted: {', '.join(ALLOWED_BASH_COMMANDS)}",
-                }
-            }
+            return _deny_response(error_msg)
 
     @staticmethod
     async def universal_path_security_hook(
@@ -430,13 +426,8 @@ class SecurityValidator:
             file_path = tool_input.get("path", ".")
 
         if not file_path:
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": f"No file path provided for {tool_name} operation",
-                }
-            }
+            error_msg = SecurityErrorMessages.no_file_path(tool_name)
+            return _deny_response(error_msg)
 
         # Validate path
         is_valid, error_reason = SecurityValidator._validate_path_within_run_directory(
@@ -470,7 +461,10 @@ class SecurityValidator:
             if test_validation_result:
                 # Audit log blocked test modification
                 get_audit_logger().log_file_operation(
-                    "edit", file_path, blocked=True, reason="Test result modification blocked"
+                    "edit",
+                    file_path,
+                    blocked=True,
+                    reason="Test result modification blocked",
                 )
                 return test_validation_result
 
@@ -498,18 +492,14 @@ class SecurityValidator:
             get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
+            error_msg = SecurityErrorMessages.rm_not_allowed(command)
             print(f"🚨 BLOCKED: {command}")
-            print("   rm command only allowed for 'rm -rf node_modules'")
             get_audit_logger().log_bash_command(
-                command, blocked=True, reason="rm only allowed for 'rm -rf node_modules'"
+                command,
+                blocked=True,
+                reason="rm only allowed for 'rm -rf node_modules'",
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "rm command only allowed for 'rm -rf node_modules'",
-                }
-            }
+            return _deny_response(error_msg)
 
     @staticmethod
     def _validate_node_command(command: str) -> dict[str, Any]:
@@ -526,18 +516,12 @@ class SecurityValidator:
             get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
+            error_msg = SecurityErrorMessages.node_not_allowed(command)
             print(f"🚨 BLOCKED: {command}")
-            print("   Node can only be used to run server.js or server/index.js")
             get_audit_logger().log_bash_command(
                 command, blocked=True, reason="Node only allowed for server.js"
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Node command can only be used to run server.js or server/index.js",
-                }
-            }
+            return _deny_response(error_msg)
 
     @staticmethod
     def _validate_pkill_command(command: str) -> dict[str, Any]:
@@ -554,20 +538,14 @@ class SecurityValidator:
             get_audit_logger().log_bash_command(command, blocked=False)
             return {}
         else:
-            print(f"🚨 BLOCKED: {command}")
-            print(
-                f"   pkill can only be used with specific patterns: {', '.join(ALLOWED_PKILL_PATTERNS)}"
+            error_msg = SecurityErrorMessages.pkill_not_allowed(
+                command, list(ALLOWED_PKILL_PATTERNS)
             )
+            print(f"🚨 BLOCKED: {command}")
             get_audit_logger().log_bash_command(
                 command, blocked=True, reason="pkill not in allowed patterns"
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": f"pkill can only be used with specific patterns: {', '.join(ALLOWED_PKILL_PATTERNS)}",
-                }
-            }
+            return _deny_response(error_msg)
 
     @staticmethod
     def _validate_sed_command(command: str) -> dict[str, Any]:
@@ -585,26 +563,12 @@ class SecurityValidator:
         """
         for pattern in BLOCKED_SED_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
+                error_msg = SecurityErrorMessages.sed_tests_json_blocked(command)
                 print(f"🚨 BLOCKED: {command}")
-                print("   sed cannot be used to bulk-modify test results in tests.json")
-                print(
-                    "   Each test must be verified individually before marking as passed"
-                )
                 get_audit_logger().log_bash_command(
                     command, blocked=True, reason="sed bulk-modify tests.json blocked"
                 )
-                return {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": (
-                            "sed cannot be used to bulk-modify test results in tests.json. "
-                            "Each test must be verified individually (take screenshot, confirm functionality) "
-                            "before updating its 'passes' field to true. Use the Edit tool to update "
-                            "individual test entries after verification."
-                        ),
-                    }
-                }
+                return _deny_response(error_msg)
         # sed command is allowed (doesn't match blocked patterns)
         return {}
 
@@ -669,16 +633,12 @@ class SecurityValidator:
         """
         for pattern in BLOCKED_TESTS_JSON_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
+                error_msg = SecurityErrorMessages.bash_tests_json_blocked(command)
                 print(f"🚨 BLOCKED: {command}")
-                print("   Cannot use bash commands to modify tests.json")
                 get_audit_logger().log_bash_command(
                     command, blocked=True, reason="bash modify tests.json blocked"
                 )
-                return _deny_response(
-                    "Cannot use bash commands to modify tests.json. "
-                    "You must use the Edit tool to update test results after taking "
-                    "and viewing a screenshot that proves the test passes."
-                )
+                return _deny_response(error_msg)
         return {}
 
     @staticmethod
@@ -722,12 +682,9 @@ class SecurityValidator:
         test_id = _extract_test_id(old_string, new_string)
 
         if not test_id:
+            error_msg = SecurityErrorMessages.test_no_id_found()
             print("🚨 BLOCKED: Cannot determine test ID from edit context")
-            return _deny_response(
-                "Cannot determine which test you are trying to mark as passing. "
-                "Ensure the edit context includes the test 'id' or 'name' field. "
-                "You must edit one test at a time with sufficient context."
-            )
+            return _deny_response(error_msg)
 
         # Get issue number from environment
         issue_number = os.environ.get("ISSUE_NUMBER", "0")
@@ -746,32 +703,23 @@ class SecurityValidator:
         screenshots = glob.glob(screenshot_pattern)
 
         if not screenshots:
+            error_msg = SecurityErrorMessages.test_no_screenshot(
+                test_id, issue_number, screenshot_pattern
+            )
             print(f"🚨 BLOCKED: No screenshot found for test '{test_id}'")
             print(f"   Pattern: {screenshot_pattern}")
-            return _deny_response(
-                f"Cannot mark test '{test_id}' as passing. No screenshot found.\n\n"
-                f"You must:\n"
-                f"  1. Execute the test steps for '{test_id}'\n"
-                f"  2. Take screenshot:\n"
-                f"     npx playwright screenshot http://localhost:6174 "
-                f"screenshots/issue-{issue_number}/{test_id}-$(date +%s | tail -c 5).png\n"
-                f"  3. Capture console output (see instructions below)\n"
-                f"  4. View both files using Read tool\n"
-                f"  5. Fix any console errors before marking as passing"
-            )
+            return _deny_response(error_msg)
 
         # =====================================================================
         # Check 2: Screenshot must have been viewed
         # =====================================================================
         screenshot_viewed = any(was_screenshot_viewed(s) for s in screenshots)
         if not screenshot_viewed:
-            print(f"🚨 BLOCKED: Screenshot exists for test '{test_id}' but not viewed")
-            return _deny_response(
-                f"Screenshot exists for test '{test_id}' but you haven't verified it.\n\n"
-                f"You must use the Read tool to view the screenshot:\n"
-                f"  Read file: {screenshots[0]}\n\n"
-                f"After viewing, also check the console log file."
+            error_msg = SecurityErrorMessages.test_screenshot_not_viewed(
+                test_id, screenshots[0]
             )
+            print(f"🚨 BLOCKED: Screenshot exists for test '{test_id}' but not viewed")
+            return _deny_response(error_msg)
 
         # =====================================================================
         # Check 3: Console log file must exist
@@ -782,33 +730,23 @@ class SecurityValidator:
         console_files = glob.glob(console_pattern)
 
         if not console_files:
+            error_msg = SecurityErrorMessages.test_no_console_log(
+                test_id, issue_number, console_pattern
+            )
             print(f"🚨 BLOCKED: No console log found for test '{test_id}'")
             print(f"   Pattern: {console_pattern}")
-            return _deny_response(
-                f"Cannot mark test '{test_id}' as passing. No console log file found.\n\n"
-                f"You must capture browser console output to verify there are no errors.\n\n"
-                f"Run this command to take a screenshot AND capture console output:\n"
-                f"  node playwright-test.cjs --url http://localhost:6174 --test-id {test_id} "
-                f"--output-dir screenshots/issue-{issue_number} --operation full\n\n"
-                f"This creates both:\n"
-                f"  - screenshots/issue-{issue_number}/{test_id}-<timestamp>.png\n"
-                f"  - screenshots/issue-{issue_number}/{test_id}-console.txt\n\n"
-                f"Then view both files and fix any errors before marking the test as passing."
-            )
+            return _deny_response(error_msg)
 
         # =====================================================================
         # Check 4: Console log file must have been viewed
         # =====================================================================
         console_viewed = any(was_screenshot_viewed(f) for f in console_files)
         if not console_viewed:
-            print(f"🚨 BLOCKED: Console log exists for test '{test_id}' but not viewed")
-            return _deny_response(
-                f"Console log exists for test '{test_id}' but you haven't verified it.\n\n"
-                f"You must use the Read tool to view the console log:\n"
-                f"  Read file: {console_files[0]}\n\n"
-                f"If there are any console errors, you must fix them before marking the test as passing.\n"
-                f"The console log should show 'NO_CONSOLE_ERRORS' for the test to pass."
+            error_msg = SecurityErrorMessages.test_console_not_viewed(
+                test_id, console_files[0]
             )
+            print(f"🚨 BLOCKED: Console log exists for test '{test_id}' but not viewed")
+            return _deny_response(error_msg)
 
         print(
             f"✅ Test '{test_id}' verified: screenshot and console log exist and were viewed"

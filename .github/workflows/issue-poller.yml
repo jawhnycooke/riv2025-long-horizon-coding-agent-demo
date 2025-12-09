@@ -162,6 +162,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AUTHORIZED_APPROVERS: ${{ vars.AUTHORIZED_APPROVERS }}
+          REQUIRED_LABELS: ${{ vars.ISSUE_LABELS }}
         run: |
           python << 'EOF'
           import os
@@ -172,6 +173,14 @@ jobs:
           # Configure via AUTHORIZED_APPROVERS repository variable (comma-separated)
           _approvers_env = os.environ.get("AUTHORIZED_APPROVERS", "")
           AUTHORIZED_APPROVERS = set(a.strip() for a in _approvers_env.split(",") if a.strip())
+
+          # Optional label filter - only issues with ALL these labels will be picked up
+          # Configure via ISSUE_LABELS repository variable (comma-separated)
+          _labels_env = os.environ.get("REQUIRED_LABELS", "")
+          REQUIRED_LABELS = [l.strip().lower() for l in _labels_env.split(",") if l.strip()]
+          if REQUIRED_LABELS:
+              print(f"🏷️ Label filter active: issues must have ALL of {REQUIRED_LABELS}")
+
           ROCKET_EMOJI = "rocket"
           LABEL_BUILDING = "agent-building"
           LABEL_COMPLETE = "agent-complete"
@@ -199,8 +208,14 @@ jobs:
           for issue in open_issues:
               # Skip if complete or failed
               labels = [l.name for l in issue.labels]
+              labels_lower = [l.lower() for l in labels]
               if LABEL_COMPLETE in labels:
                   continue
+
+              # Filter by required labels if specified
+              if REQUIRED_LABELS:
+                  if not all(req_label in labels_lower for req_label in REQUIRED_LABELS):
+                      continue  # Skip issues that don't have all required labels
 
               # Check for rocket reaction from authorized staff
               reactions = issue.get_reactions()

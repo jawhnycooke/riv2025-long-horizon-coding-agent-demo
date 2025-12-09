@@ -150,8 +150,8 @@
       "name": "Session Lock Improvements",
       "description": "Add jitter and timeout handling to prevent deadlocks in agent-builder workflow",
       "priority": "P1",
-      "status": "pending",
-      "passes": false,
+      "status": "complete",
+      "passes": true,
       "acceptanceCriteria": [
         "Lock acquisition includes random jitter (0-5 seconds)",
         "Lock has configurable timeout (default: 10 minutes)",
@@ -160,10 +160,10 @@
         "Deadlock recovery documented in runbook"
       ],
       "subtasks": [
-        {"task": "Add jitter to lock acquisition in workflow", "status": "pending"},
-        {"task": "Implement lock timeout mechanism", "status": "pending"},
-        {"task": "Add lock status output", "status": "pending"},
-        {"task": "Document recovery procedures", "status": "pending"}
+        {"task": "Add jitter to lock acquisition in workflow", "status": "complete"},
+        {"task": "Implement lock timeout mechanism", "status": "complete"},
+        {"task": "Add lock status output", "status": "complete"},
+        {"task": "Document recovery procedures", "status": "complete"}
       ],
       "source": "Code Review#medium-priority"
     },
@@ -216,8 +216,8 @@
       "name": "Issue Label Filtering",
       "description": "Support --labels flag to filter which GitHub issues the agent picks up",
       "priority": "P2",
-      "status": "pending",
-      "passes": false,
+      "status": "complete",
+      "passes": true,
       "acceptanceCriteria": [
         "--labels flag added to argument parser",
         "Multiple labels supported (comma-separated)",
@@ -226,10 +226,10 @@
         "Default behavior unchanged when no labels specified"
       ],
       "subtasks": [
-        {"task": "Add --labels argument", "status": "pending"},
-        {"task": "Update github_integration.py to filter by labels", "status": "pending"},
-        {"task": "Update issue-poller workflow", "status": "pending"},
-        {"task": "Document label filtering", "status": "pending"}
+        {"task": "Add --labels argument", "status": "complete"},
+        {"task": "Update github_integration.py to filter by labels", "status": "complete"},
+        {"task": "Update issue-poller workflow", "status": "complete"},
+        {"task": "Document label filtering", "status": "complete"}
       ],
       "source": "Code Review#nice-to-have"
     },
@@ -238,8 +238,8 @@
       "name": "Improved Security Hook Messages",
       "description": "Make security hook rejection messages explain why the action was blocked",
       "priority": "P2",
-      "status": "pending",
-      "passes": false,
+      "status": "complete",
+      "passes": true,
       "acceptanceCriteria": [
         "Path validation errors include attempted path and allowed root",
         "Bash command errors include blocked command and reason",
@@ -248,10 +248,10 @@
         "Errors logged to audit trail"
       ],
       "subtasks": [
-        {"task": "Improve path validation error messages", "status": "pending"},
-        {"task": "Improve bash command error messages", "status": "pending"},
-        {"task": "Improve test verification error messages", "status": "pending"},
-        {"task": "Add suggestions for common errors", "status": "pending"}
+        {"task": "Improve path validation error messages", "status": "complete"},
+        {"task": "Improve bash command error messages", "status": "complete"},
+        {"task": "Improve test verification error messages", "status": "complete"},
+        {"task": "Add suggestions for common errors", "status": "complete"}
       ],
       "source": "Code Review#nice-to-have"
     },
@@ -328,8 +328,8 @@
       "name": "Configurable Completion Signal",
       "description": "Make the completion signal configurable instead of hardcoded",
       "priority": "P2",
-      "status": "pending",
-      "passes": false,
+      "status": "complete",
+      "passes": true,
       "acceptanceCriteria": [
         "Completion signal configurable in .claude-code.json",
         "Default remains current emoji string",
@@ -338,10 +338,10 @@
         "bedrock_entrypoint.py reads signal from config"
       ],
       "subtasks": [
-        {"task": "Add completion_signal to config schema", "status": "pending"},
-        {"task": "Update claude_code.py to use config signal", "status": "pending"},
-        {"task": "Update bedrock_entrypoint.py", "status": "pending"},
-        {"task": "Document in CLAUDE.md", "status": "pending"}
+        {"task": "Add completion_signal to config schema", "status": "complete"},
+        {"task": "Update claude_code.py to use config signal", "status": "complete"},
+        {"task": "Update bedrock_entrypoint.py", "status": "complete"},
+        {"task": "Document in CLAUDE.md", "status": "complete"}
       ],
       "source": "Code Review#quick-wins"
     },
@@ -369,9 +369,9 @@
   ],
   "metrics": {
     "total": 16,
-    "verified": 11,
+    "verified": 15,
     "inProgress": 0,
-    "pending": 5,
-    "percentComplete": 68.75
+    "pending": 1,
+    "percentComplete": 93.75
   }
 }

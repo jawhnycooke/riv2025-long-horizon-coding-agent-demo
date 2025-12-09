@@ -95,6 +95,80 @@ class TracingSettings:
         return result
 
 
+# Default completion signal
+DEFAULT_COMPLETION_SIGNAL = "🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED"
+
+
+@dataclass
+class CompletionSignalSettings:
+    """Completion signal configuration settings.
+
+    The completion signal is the message the agent outputs when it has
+    finished all tasks. This signal triggers state transitions and
+    marks the issue as complete.
+    """
+
+    signal: str = DEFAULT_COMPLETION_SIGNAL
+    emoji: str = "🎉"
+    complete_phrase: str = "implementation complete"
+    finished_phrase: str = "all tasks finished"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CompletionSignalSettings":
+        """Create CompletionSignalSettings from dictionary.
+
+        If only 'signal' is provided, extracts emoji and phrases from it.
+        """
+        signal = data.get("signal", DEFAULT_COMPLETION_SIGNAL)
+
+        # Allow explicit override of detection components
+        emoji = data.get("emoji")
+        complete_phrase = data.get("complete_phrase")
+        finished_phrase = data.get("finished_phrase")
+
+        # If not explicitly provided, extract from signal
+        if emoji is None:
+            # Find first emoji in signal (common emojis)
+            for char in signal:
+                if ord(char) > 127 and not char.isspace():
+                    emoji = char
+                    break
+            if emoji is None:
+                emoji = "🎉"  # Default emoji
+
+        if complete_phrase is None:
+            complete_phrase = "implementation complete"
+
+        if finished_phrase is None:
+            finished_phrase = "all tasks finished"
+
+        return cls(
+            signal=signal,
+            emoji=emoji,
+            complete_phrase=complete_phrase,
+            finished_phrase=finished_phrase,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        result: dict[str, Any] = {
+            "signal": self.signal,
+        }
+        # Only include detection components if they differ from defaults
+        if self.emoji != "🎉":
+            result["emoji"] = self.emoji
+        if self.complete_phrase != "implementation complete":
+            result["complete_phrase"] = self.complete_phrase
+        if self.finished_phrase != "all tasks finished":
+            result["finished_phrase"] = self.finished_phrase
+        return result
+
+    @classmethod
+    def default(cls) -> "CompletionSignalSettings":
+        """Return default completion signal settings."""
+        return cls()
+
+
 @dataclass
 class ProjectConfig:
     """Project configuration loaded from .claude-code.json."""
@@ -108,6 +182,7 @@ class ProjectConfig:
     anthropic_api_key: str | None = None
     retry: RetrySettings | None = None
     tracing: TracingSettings | None = None
+    completion_signal: CompletionSignalSettings | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectConfig":
@@ -122,6 +197,7 @@ class ProjectConfig:
         anthropic_config = data.get("anthropic", {})
         retry_config = data.get("retry", {})
         tracing_config = data.get("tracing", {})
+        completion_signal_config = data.get("completion_signal", {})
 
         return cls(
             provider=provider,
@@ -134,7 +210,14 @@ class ProjectConfig:
             ),
             anthropic_api_key=anthropic_config.get("api_key"),
             retry=RetrySettings.from_dict(retry_config) if retry_config else None,
-            tracing=TracingSettings.from_dict(tracing_config) if tracing_config else None,
+            tracing=(
+                TracingSettings.from_dict(tracing_config) if tracing_config else None
+            ),
+            completion_signal=(
+                CompletionSignalSettings.from_dict(completion_signal_config)
+                if completion_signal_config
+                else None
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -162,6 +245,9 @@ class ProjectConfig:
 
         if self.tracing:
             result["tracing"] = self.tracing.to_dict()
+
+        if self.completion_signal:
+            result["completion_signal"] = self.completion_signal.to_dict()
 
         return result
 

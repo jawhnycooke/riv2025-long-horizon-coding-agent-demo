@@ -79,6 +79,9 @@ python claude_code.py --dry-run --project canopy
 # Dry run with provider override
 python claude_code.py --dry-run --project canopy --provider anthropic
 
+# Filter issues by labels (GitHub mode)
+python claude_code.py --project canopy --labels "feature,priority-high"
+
 # Install dependencies
 uv pip install -r requirements.txt
 ```
@@ -100,6 +103,36 @@ The `--dry-run` flag simulates agent execution without making API calls. It perf
 - CI/CD validation before deployment
 - Pre-flight checks before long-running sessions
 - Debugging configuration issues
+
+### Issue Label Filtering
+
+The `--labels` flag filters which GitHub issues the agent picks up (GitHub mode only).
+
+**CLI Usage:**
+```bash
+# Only pick up issues with the "feature" label
+python claude_code.py --project canopy --labels "feature"
+
+# Require multiple labels (comma-separated) - issues must have ALL labels
+python claude_code.py --project canopy --labels "feature,priority-high"
+```
+
+**Workflow Configuration:**
+Configure via the `ISSUE_LABELS` repository variable (Settings → Variables → Actions):
+```
+ISSUE_LABELS=feature,priority-high
+```
+
+**Behavior:**
+- Issues must have **ALL** specified labels to be picked up
+- Label matching is **case-insensitive** ("Feature" matches "feature")
+- When no labels specified, all approved issues are eligible (default behavior)
+- Works with both CLI (`--labels`) and issue-poller workflow (`ISSUE_LABELS` variable)
+
+**Use cases:**
+- Filter builds to specific issue types (e.g., only "feature" or "bug" labels)
+- Prioritize high-priority issues (e.g., require "priority-high" label)
+- Separate different environments (e.g., "production" vs "staging" labels)
 
 ## Architecture
 
@@ -154,6 +187,32 @@ The agent is sandboxed via hooks in `src/security.py`:
 Blocked patterns:
 - Bulk modification of `tests.json` via sed/awk/jq/python (must use Edit tool with screenshot verification)
 - Commands outside allowlist in `src/config.py`
+
+### Security Error Messages
+
+All security hook rejections provide actionable error messages via `src/error_messages.py`:
+
+**Message Format:**
+```
+🚫 [TYPE] BLOCKED: [brief description]
+
+[Details about what was attempted]
+
+💡 How to fix:
+  • [Specific actionable suggestion]
+  • [Alternative approach]
+```
+
+**Error Categories:**
+
+| Category | Error Types | Example Suggestion |
+|----------|-------------|-------------------|
+| **Path Validation** | Outside project, no project root | Use relative paths within project |
+| **Bash Commands** | Not in allowlist, rm restricted | Use Edit tool for file operations |
+| **Git Operations** | git init blocked | Use existing repository |
+| **Test Verification** | No screenshot, screenshot not viewed | Take and view screenshot first |
+
+All blocked actions are logged to the audit trail for security review.
 
 ### OpenTelemetry Tracing
 
@@ -224,6 +283,45 @@ State is controlled via `agent_state.json` in the generation directory:
 }
 ```
 
+### Session Lock Management
+
+The agent-builder workflow uses a distributed lock mechanism to prevent race conditions when multiple issues are approved simultaneously. The lock is implemented using the `agent-building` GitHub label combined with a GitHub Actions concurrency group.
+
+**Lock Features:**
+- **Jitter**: Random 0-5 second delay before lock acquisition to reduce thundering herd
+- **Timeout**: Configurable lock timeout (default: 10 minutes / 600 seconds)
+- **Stale Lock Release**: Automatically releases locks that exceed the timeout threshold
+- **Status Outputs**: Lock status queryable via GitHub Actions workflow outputs
+
+**Configuration** (via GitHub repository variables):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCK_TIMEOUT_SECONDS` | `600` | Lock timeout in seconds (10 minutes) |
+| `HEARTBEAT_STALENESS_SECONDS` | `300` | Session heartbeat staleness threshold |
+
+**Workflow Outputs** (from `acquire-runtime-lock` job):
+| Output | Description |
+|--------|-------------|
+| `lock_acquired` | Whether this workflow acquired the lock |
+| `lock_age_seconds` | How long the existing lock was held |
+| `stale_lock_released` | Whether a stale lock was auto-released |
+| `lock_holder_issue` | Issue number holding the lock |
+
+**Check Lock Status Manually:**
+```bash
+# Using the helper script
+GITHUB_TOKEN=your_token python .github/scripts/check_lock_status.py --repo owner/repo
+
+# Using gh CLI directly
+gh api repos/OWNER/REPO/issues -q '.[] | select(.labels[].name == "agent-building") | .number'
+```
+
+**Deadlock Recovery:**
+If the agent crashes and leaves a stale lock:
+1. The lock will auto-release after 10 minutes (configurable)
+2. Alternatively, manually remove the label: `gh issue edit ISSUE_NUMBER --remove-label agent-building`
+3. The issue poller will detect the stale session via CloudWatch heartbeat and trigger a restart
+
 ## Key Conventions
 
 ### Tests JSON Verification
@@ -279,10 +377,56 @@ The agent creates React+Vite+Tailwind apps in `generated-app/`:
 
 ### Completion Signal
 
-Agent signals completion with: `🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED`
+Agent signals completion with a configurable message. Default: `🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED`
 
-This triggers:
-1. State transition to pause
+**Configuration** (in `.claude-code.json`):
+```json
+{
+  "completion_signal": {
+    "signal": "🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED",
+    "emoji": "🎉",
+    "complete_phrase": "implementation complete",
+    "finished_phrase": "all tasks finished"
+  }
+}
+```
+
+**Settings:**
+| Field | Default | Description |
+|-------|---------|-------------|
+| `signal` | `🎉 IMPLEMENTATION COMPLETE - ALL TASKS FINISHED` | Full completion message output by agent |
+| `emoji` | Auto-extracted from signal, or `🎉` | Emoji marker for detection |
+| `complete_phrase` | `implementation complete` | Phrase to detect (case-insensitive) |
+| `finished_phrase` | `all tasks finished` | Second phrase to detect (case-insensitive) |
+
+**Detection Logic:**
+The completion signal is detected when ALL of the following are present in agent output:
+1. The configured emoji character
+2. The `complete_phrase` (case-insensitive)
+3. The `finished_phrase` (case-insensitive)
+
+**Custom Signal Examples:**
+```json
+// Minimal config - just change the signal, phrases auto-extracted
+{
+  "completion_signal": {
+    "signal": "✅ BUILD COMPLETE - ALL TESTS PASSED"
+  }
+}
+
+// Full customization
+{
+  "completion_signal": {
+    "signal": "🚀 LAUNCH SUCCESSFUL",
+    "emoji": "🚀",
+    "complete_phrase": "launch successful",
+    "finished_phrase": "launch successful"
+  }
+}
+```
+
+**What Triggers on Completion:**
+1. State transition to `pause`
 2. `agent-complete` label on GitHub issue
 3. Deploy preview workflow
 
