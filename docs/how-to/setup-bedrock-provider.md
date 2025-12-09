@@ -306,8 +306,8 @@ NoCredentialsError: Unable to locate credentials
 
 ## Related Tasks
 
-- [Deploy to AWS with CDK](../infrastructure/README.md)
-- [Configure GitHub Actions Workflows](./configure-github-workflows.md)
+- [Deploy to AWS with CDK](../../infrastructure/README.md)
+- [Configure GitHub Repository](./configure-github-repository.md)
 - [Set Up OpenTelemetry Tracing](./setup-tracing.md)
 
 ## Summary
