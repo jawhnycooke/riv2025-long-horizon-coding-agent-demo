@@ -150,8 +150,8 @@
       "name": "Session Lock Improvements",
       "description": "Add jitter and timeout handling to prevent deadlocks in agent-builder workflow",
       "priority": "P1",
-      "status": "pending",
-      "passes": false,
+      "status": "complete",
+      "passes": true,
       "acceptanceCriteria": [
         "Lock acquisition includes random jitter (0-5 seconds)",
         "Lock has configurable timeout (default: 10 minutes)",
@@ -160,10 +160,10 @@
         "Deadlock recovery documented in runbook"
       ],
       "subtasks": [
-        {"task": "Add jitter to lock acquisition in workflow", "status": "pending"},
-        {"task": "Implement lock timeout mechanism", "status": "pending"},
-        {"task": "Add lock status output", "status": "pending"},
-        {"task": "Document recovery procedures", "status": "pending"}
+        {"task": "Add jitter to lock acquisition in workflow", "status": "complete"},
+        {"task": "Implement lock timeout mechanism", "status": "complete"},
+        {"task": "Add lock status output", "status": "complete"},
+        {"task": "Document recovery procedures", "status": "complete"}
       ],
       "source": "Code Review#medium-priority"
     },
@@ -369,9 +369,9 @@
   ],
   "metrics": {
     "total": 16,
-    "verified": 11,
+    "verified": 12,
     "inProgress": 0,
-    "pending": 5,
-    "percentComplete": 68.75
+    "pending": 4,
+    "percentComplete": 75.0
   }
 }

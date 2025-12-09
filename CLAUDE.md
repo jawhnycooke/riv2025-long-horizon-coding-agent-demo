@@ -224,6 +224,45 @@ State is controlled via `agent_state.json` in the generation directory:
 }
 ```
 
+### Session Lock Management
+
+The agent-builder workflow uses a distributed lock mechanism to prevent race conditions when multiple issues are approved simultaneously. The lock is implemented using the `agent-building` GitHub label combined with a GitHub Actions concurrency group.
+
+**Lock Features:**
+- **Jitter**: Random 0-5 second delay before lock acquisition to reduce thundering herd
+- **Timeout**: Configurable lock timeout (default: 10 minutes / 600 seconds)
+- **Stale Lock Release**: Automatically releases locks that exceed the timeout threshold
+- **Status Outputs**: Lock status queryable via GitHub Actions workflow outputs
+
+**Configuration** (via GitHub repository variables):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCK_TIMEOUT_SECONDS` | `600` | Lock timeout in seconds (10 minutes) |
+| `HEARTBEAT_STALENESS_SECONDS` | `300` | Session heartbeat staleness threshold |
+
+**Workflow Outputs** (from `acquire-runtime-lock` job):
+| Output | Description |
+|--------|-------------|
+| `lock_acquired` | Whether this workflow acquired the lock |
+| `lock_age_seconds` | How long the existing lock was held |
+| `stale_lock_released` | Whether a stale lock was auto-released |
+| `lock_holder_issue` | Issue number holding the lock |
+
+**Check Lock Status Manually:**
+```bash
+# Using the helper script
+GITHUB_TOKEN=your_token python .github/scripts/check_lock_status.py --repo owner/repo
+
+# Using gh CLI directly
+gh api repos/OWNER/REPO/issues -q '.[] | select(.labels[].name == "agent-building") | .number'
+```
+
+**Deadlock Recovery:**
+If the agent crashes and leaves a stale lock:
+1. The lock will auto-release after 10 minutes (configurable)
+2. Alternatively, manually remove the label: `gh issue edit ISSUE_NUMBER --remove-label agent-building`
+3. The issue poller will detect the stale session via CloudWatch heartbeat and trigger a restart
+
 ## Key Conventions
 
 ### Tests JSON Verification
