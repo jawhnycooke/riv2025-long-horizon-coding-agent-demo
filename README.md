@@ -22,21 +22,23 @@ This project showcases **production patterns for long-horizon AI coding sessions
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Orchestrator Agent                        │
-│  (Coordinates workflow, makes high-level decisions)          │
+│  (Coordinates workflow, can execute or delegate)             │
+│  Tools: Read, Write, Edit, MultiEdit, Glob, Grep, Bash, Task │
 │  - Reads tests.json, claude-progress.txt, git logs           │
 │  - Selects next feature to implement                         │
-│  - Delegates atomic tasks to Worker                          │
+│  - Can delegate complex tasks to Worker via Task tool        │
 │  - Manages session state and clean shutdown                  │
 └─────────────────────┬───────────────────────────────────────┘
-                      │ Task tool
+                      │ Task tool (optional delegation)
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      Worker Agent                            │
-│  (Executes atomic tasks)                                     │
-│  - File operations (Read/Write/Edit)                         │
-│  - Bash commands (npm, playwright)                           │
-│  - Screenshot verification                                   │
-│  - Returns structured results                                │
+│                      Worker Agent (Subagent)                 │
+│  (Executes delegated atomic tasks)                           │
+│  Tools: Read, Write, Edit, MultiEdit, Glob, Grep, Bash       │
+│  - File operations and code modifications                    │
+│  - Bash commands (npm, playwright, git)                      │
+│  - Screenshot verification workflow                          │
+│  - Returns structured results to Orchestrator                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
