@@ -48,6 +48,7 @@ from src.tracing import (
     get_tracing_manager,
     initialize_tracing,
 )
+from src.agents import create_orchestrator_client, create_legacy_client
 
 
 # Global state
@@ -1314,120 +1315,31 @@ def _create_claude_client(
     args: argparse.Namespace,
     system_prompt: str,
     generation_dir: Path,
+    use_orchestrator: bool = True,
 ) -> ClaudeSDKClient:
-    """Create and configure the Claude SDK client."""
+    """Create and configure the Claude SDK client.
 
-    # Use the generation_dir directly as the project root
-    project_root = str(generation_dir)
+    This function delegates to the new orchestrator pattern from src/agents/.
+    The orchestrator pattern implements the two-agent architecture from
+    Anthropic's "Effective Harnesses for Long-Running Agents" article.
 
-    # Create security hook wrappers that capture project_root
-    async def bash_security_hook_wrapper(input_data, tool_use_id=None, context=None):
-        return await SecurityValidator.bash_security_hook(
-            input_data, tool_use_id, context, project_root
-        )
+    Args:
+        args: Command line arguments (must have .model attribute)
+        system_prompt: System prompt for the agent
+        generation_dir: Project directory path
+        use_orchestrator: If True, use Orchestrator+Worker pattern.
+                         If False, use legacy monolithic client.
 
-    async def cd_enforcement_hook_wrapper(input_data, tool_use_id=None, context=None):
-        return await SecurityValidator.cd_enforcement_hook(
-            input_data, tool_use_id, context, project_root
-        )
-
-    async def universal_path_security_hook_wrapper(
-        input_data, tool_use_id=None, context=None
-    ):
-        return await SecurityValidator.universal_path_security_hook(
-            input_data, tool_use_id, context, project_root
-        )
-
-    async def track_read_hook_wrapper(input_data, tool_use_id=None, context=None):
-        return await SecurityValidator.track_read_hook(
-            input_data, tool_use_id, context, project_root
-        )
-
-    # Tracing hooks for OpenTelemetry integration
-    # Store active spans by tool_use_id for correlation
-    active_spans: dict[str, Any] = {}
-
-    async def tracing_pre_hook(input_data, tool_use_id=None, context=None):
-        """Start a tracing span before tool execution."""
-        tracing = get_tracing_manager()
-        if not tracing.is_enabled:
-            return input_data
-
-        tool_name = input_data.get("tool_name", "unknown")
-        tool_input = input_data.get("tool_input", {})
-
-        # Create a span context
-        tracer = tracing.trace_tool_call(tool_name, tool_input)
-        tracer.__enter__()
-
-        # Store for later completion
-        if tool_use_id:
-            active_spans[tool_use_id] = tracer
-
-        return input_data
-
-    async def tracing_post_hook(input_data, tool_use_id=None, context=None):
-        """End the tracing span after tool execution."""
-        if not tool_use_id or tool_use_id not in active_spans:
-            return input_data
-
-        tracer = active_spans.pop(tool_use_id)
-
-        # Check for error in result
-        tool_result = input_data.get("tool_result", {})
-        if isinstance(tool_result, dict):
-            is_error = tool_result.get("is_error", False)
-            content = tool_result.get("content", "")
-            if is_error:
-                error_msg = str(content)[:200] if content else "Unknown error"
-                tracer.set_error(error_msg)
-            else:
-                result_preview = str(content)[:200] if content else ""
-                tracer.set_success(result_preview)
-
-        tracer.__exit__(None, None, None)
-        return input_data
-
-    # For Docker/AWS deployment: explicitly set CLI path if in containerized environment
-    cli_path = (
-        "/usr/local/bin/claude" if os.path.exists("/usr/local/bin/claude") else None
-    )
-
-    return ClaudeSDKClient(
-        options=ClaudeAgentOptions(
-            model=args.model,
-            system_prompt=system_prompt,
-            cli_path=cli_path,  # Explicitly set for Docker compatibility
-            allowed_tools=[
-                "think",
-                "Read",
-                "Glob",
-                "Grep",
-                "Write",
-                "Edit",
-                "MultiEdit",
-                "Bash",
-            ],
-            disallowed_tools=[],
-            mcp_servers={},
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="*", hooks=[universal_path_security_hook_wrapper]
-                    ),
-                    HookMatcher(matcher="*", hooks=[tracing_pre_hook]),
-                ],
-                "PostToolUse": [
-                    HookMatcher(matcher="Bash", hooks=[cd_enforcement_hook_wrapper]),
-                    HookMatcher(matcher="Read", hooks=[track_read_hook_wrapper]),
-                    HookMatcher(matcher="*", hooks=[tracing_post_hook]),
-                ],
-            },
-            max_turns=10000,
-            cwd=str(generation_dir),
-            add_dirs=[str(generation_dir / "prompts")],
-        )
-    )
+    Returns:
+        Configured ClaudeSDKClient
+    """
+    if use_orchestrator:
+        # Use the new Orchestrator + Worker pattern
+        # This enables task delegation and structured agent architecture
+        return create_orchestrator_client(args, system_prompt, generation_dir)
+    else:
+        # Fall back to legacy monolithic client (for testing/comparison)
+        return create_legacy_client(args, system_prompt, generation_dir)
 
 
 async def _run_cleanup_session(
