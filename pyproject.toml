@@ -50,7 +50,7 @@ dev = [
 ]
 
 [project.scripts]
-claude-code = "claude_code:main"
+claude-code = "agent:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -128,8 +128,8 @@ pretty = true
 # Gradual adoption - strict on new code, relaxed on legacy
 [[tool.mypy.overrides]]
 module = [
-    "claude_code",
-    "bedrock_entrypoint",
+    "agent",
+    "aws_runner",
     "install",
 ]
 # Allow legacy entry points to have less strict typing initially
@@ -207,7 +207,7 @@ unfixable = []
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG001", "ARG002", "S101"]  # Allow assert and unused args in tests (fixtures)
 "__init__.py" = ["F401", "F403"]  # Allow unused imports and star imports in __init__
-"bedrock_entrypoint.py" = ["B007", "RUF001"]  # Unused loop var, emoji in strings
+"aws_runner.py" = ["B007", "RUF001"]  # Unused loop var, emoji in strings
 "src/github_integration.py" = ["ARG002", "SIM105", "SIM115"]  # Unused arg, suppress pattern, file handle
 "src/logging_utils.py" = ["SIM115"]  # File handle intentionally kept open
 

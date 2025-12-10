@@ -490,7 +490,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--bootstrap-files",
         action="store_true",
-        help="Copy reference implementation files (claude_code.py, src/) into project for agent to study",
+        help="Copy reference implementation files (agent.py, src/) into project for agent to study",
     )
 
     parser.add_argument(
@@ -523,7 +523,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--skip-git-init",
         action="store_true",
-        help="Skip git initialization (used when bedrock_entrypoint.py handles git setup)",
+        help="Skip git initialization (used when aws_runner.py handles git setup)",
     )
 
     parser.add_argument(
@@ -1536,7 +1536,7 @@ async def _run_single_session(
         # 2. FEATURE_REQUEST.md exists in parent dir (multi-issue: new issue after first build)
         #
         # Note: We only check parent's FEATURE_REQUEST.md for non-first sessions.
-        # For first session, bedrock_entrypoint.py already set the correct mode via args.
+        # For first session, aws_runner.py already set the correct mode via args.
         # After reading FEATURE_REQUEST.md, we rename it to .processed so that
         # continuation sessions don't re-read it.
         feature_request_path = None

@@ -210,13 +210,13 @@ def display_success(config: dict[str, Any]) -> None:
     if config.get("provider") == "anthropic":
         next_steps = (
             "1. Set ANTHROPIC_API_KEY environment variable\n"
-            "2. Run: python claude_code.py --project <name>"
+            "2. Run: python agent.py --project <name>"
         )
     else:
         next_steps = (
             "1. Ensure AWS credentials are configured\n"
             "   (aws configure or IAM role)\n"
-            "2. Run: python claude_code.py --project <name>"
+            "2. Run: python agent.py --project <name>"
         )
 
     console.print(

@@ -1,7 +1,7 @@
 """Centralized git operations manager for Claude Code.
 
 This module consolidates all git-related operations that were previously scattered
-across bedrock_entrypoint.py and session_manager.py.
+across aws_runner.py and session_manager.py.
 
 Key responsibilities:
 - Git repository initialization (local mode)

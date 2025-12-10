@@ -189,7 +189,7 @@ class SessionManager:
         Args:
             generation_dir: Session directory
         """
-        # Determine repo root (where claude_code.py lives)
+        # Determine repo root (where agent.py lives)
         repo_root = Path(__file__).parent.parent.resolve()
 
         # Create reference directory
@@ -198,13 +198,13 @@ class SessionManager:
 
         builtins.print("\n🔧 Copying bootstrap/reference files:")
 
-        # Copy claude_code.py
-        src_file = repo_root / "claude_code.py"
+        # Copy agent.py
+        src_file = repo_root / "agent.py"
         if src_file.exists():
-            shutil.copy2(src_file, reference_dir / "claude_code.py")
-            builtins.print("  ✓ claude_code.py")
+            shutil.copy2(src_file, reference_dir / "agent.py")
+            builtins.print("  ✓ agent.py")
         else:
-            builtins.print(f"  ⚠️  claude_code.py not found at {src_file}")
+            builtins.print(f"  ⚠️  agent.py not found at {src_file}")
 
         # Copy src/ directory
         src_dir = repo_root / "src"

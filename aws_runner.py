@@ -199,7 +199,7 @@ def setup_post_commit_hook(build_dir: Path, github_repo: str, branch_name: str) 
     # Uses token from file (refreshed by runtime) to push immediately
     hook_script = f"""#!/bin/bash
 # Git post-commit hook - pushes immediately after each commit
-# Installed by bedrock_entrypoint.py for event-driven push workflow
+# Installed by aws_runner.py for event-driven push workflow
 
 BRANCH_NAME="{branch_name}"
 GITHUB_REPO="{github_repo}"
@@ -1788,7 +1788,7 @@ def run_agent_background(
     feature_request_path: Path | None = None,
 ):
     """
-    Run claude_code.py in background thread.
+    Run agent.py in background thread.
     This allows the handler to return while agent continues running.
 
     Args:
@@ -1823,7 +1823,7 @@ def run_agent_background(
             # Enhancement mode - enhance existing generated-app/
             cmd = [
                 "python",
-                "/app/claude_code.py",
+                "/app/agent.py",
                 "--enhance-feature",
                 str(feature_request_path),
                 "--existing-codebase",
@@ -1840,7 +1840,7 @@ def run_agent_background(
             project_name = os.environ.get("PROJECT_NAME", "canopy")
             cmd = [
                 "python",
-                "/app/claude_code.py",
+                "/app/agent.py",
                 "--project",
                 project_name,
                 "--provider",
@@ -1861,7 +1861,7 @@ def run_agent_background(
 
         cmd = [
             "python",
-            "claude_code.py",
+            "agent.py",
             "--project",
             project,
             "--provider",
@@ -3327,10 +3327,10 @@ Commits should reference this issue: `Ref: #{issue_number}`
 def _find_agent_state_file() -> Path | None:
     """Find the agent_state.json file in the workspace.
 
-    The agent (claude_code.py) writes state to the --output-dir which is
+    The agent (agent.py) writes state to the --output-dir which is
     typically generated-app/. Check there first, then fallback to parent.
     """
-    # Primary location: generated-app/ subdirectory (where claude_code.py writes)
+    # Primary location: generated-app/ subdirectory (where agent.py writes)
     generated_app_state = AGENT_RUNTIME_DIR / "generated-app" / "agent_state.json"
     if generated_app_state.exists():
         return generated_app_state
@@ -3379,7 +3379,7 @@ def _set_agent_desired_state(desired_state: str, note: str = "") -> bool:
     try:
         state = json.loads(state_file.read_text())
         state["desired_state"] = desired_state
-        state["note"] = note or f"State set to {desired_state} by bedrock_entrypoint"
+        state["note"] = note or f"State set to {desired_state} by aws_runner"
         state["timestamp"] = datetime.utcnow().isoformat() + "Z"
         state["setBy"] = "agentcore_wrapper"
 

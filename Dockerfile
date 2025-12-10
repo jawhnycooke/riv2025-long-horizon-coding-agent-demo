@@ -42,8 +42,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir bedrock-agentcore
 
 # Copy application code
-COPY claude_code.py .
-COPY bedrock_entrypoint.py .
+COPY agent.py .
+COPY aws_runner.py .
 COPY src/ ./src/
 COPY prompts/ ./prompts/
 COPY frontend-scaffold-template/ ./frontend-scaffold-template/
@@ -64,4 +64,4 @@ ENV PYTHONUNBUFFERED=1
 
 # Initialize workspace with required files at startup
 # Use opentelemetry-instrument to enable ADOT tracing for AgentCore observability
-CMD ["sh", "-c", "cp -r /app/prompts /app/workspace/ 2>/dev/null || true && cp -r /app/frontend-scaffold-template /app/workspace/ 2>/dev/null || true && opentelemetry-instrument python bedrock_entrypoint.py"]
+CMD ["sh", "-c", "cp -r /app/prompts /app/workspace/ 2>/dev/null || true && cp -r /app/frontend-scaffold-template /app/workspace/ 2>/dev/null || true && opentelemetry-instrument python aws_runner.py"]

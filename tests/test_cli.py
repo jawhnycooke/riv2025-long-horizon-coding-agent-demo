@@ -1,4 +1,4 @@
-"""Tests for claude_code.py CLI functionality - argument parsing and validation."""
+"""Tests for agent.py CLI functionality - argument parsing and validation."""
 
 import argparse
 import json
@@ -10,10 +10,10 @@ from unittest.mock import patch
 import pytest
 
 
-# We need to import from claude_code - handle the module path
+# We need to import from agent - handle the module path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_code import (
+from agent import (
     dry_run_simulation,
     parse_arguments,
     validate_config,
@@ -25,20 +25,20 @@ class TestParseArguments:
 
     def test_dry_run_flag_present(self) -> None:
         """--dry-run flag is recognized by parser."""
-        with patch.object(sys, "argv", ["claude_code.py", "--dry-run"]):
+        with patch.object(sys, "argv", ["agent.py", "--dry-run"]):
             args = parse_arguments()
             assert args.dry_run is True
 
     def test_dry_run_default_false(self) -> None:
         """--dry-run defaults to False when not specified."""
-        with patch.object(sys, "argv", ["claude_code.py"]):
+        with patch.object(sys, "argv", ["agent.py"]):
             args = parse_arguments()
             assert args.dry_run is False
 
     def test_dry_run_with_project(self) -> None:
         """--dry-run can be combined with --project."""
         with patch.object(
-            sys, "argv", ["claude_code.py", "--dry-run", "--project", "canopy"]
+            sys, "argv", ["agent.py", "--dry-run", "--project", "canopy"]
         ):
             args = parse_arguments()
             assert args.dry_run is True
@@ -47,7 +47,7 @@ class TestParseArguments:
     def test_dry_run_with_provider(self) -> None:
         """--dry-run can be combined with --provider."""
         with patch.object(
-            sys, "argv", ["claude_code.py", "--dry-run", "--provider", "anthropic"]
+            sys, "argv", ["agent.py", "--dry-run", "--provider", "anthropic"]
         ):
             args = parse_arguments()
             assert args.dry_run is True
@@ -55,13 +55,13 @@ class TestParseArguments:
 
     def test_version_flag(self) -> None:
         """--version flag is recognized."""
-        with patch.object(sys, "argv", ["claude_code.py", "--version"]):
+        with patch.object(sys, "argv", ["agent.py", "--version"]):
             args = parse_arguments()
             assert args.version is True
 
     def test_validate_flag(self) -> None:
         """--validate flag is recognized."""
-        with patch.object(sys, "argv", ["claude_code.py", "--validate"]):
+        with patch.object(sys, "argv", ["agent.py", "--validate"]):
             args = parse_arguments()
             assert args.validate is True
 

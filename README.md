@@ -16,8 +16,8 @@ flowchart TB
 
     subgraph AWS["AWS Cloud"]
         subgraph AgentCore["Bedrock AgentCore"]
-            Entrypoint["bedrock_entrypoint.py<br/>(Orchestrator)"]
-            Agent["claude_code.py<br/>(Session Manager)"]
+            Entrypoint["aws_runner.py<br/>(Orchestrator)"]
+            Agent["agent.py<br/>(Session Manager)"]
             SDK["Claude Agent SDK"]
         end
 
@@ -31,7 +31,7 @@ flowchart TB
     end
 
     subgraph LocalDev["Local Development"]
-        CLI["python claude_code.py"]
+        CLI["python agent.py"]
         Config[".claude-code.json"]
     end
 
@@ -188,6 +188,35 @@ stateDiagram-v2
 11. **If more issues exist**, the agent continues in enhancement mode
 12. **Deploy preview** workflow builds and deploys to CloudFront
 
+### Repository Setup (GitHub Mode)
+
+In GitHub mode, the agent clones your target repository and builds from scratch:
+
+```mermaid
+sequenceDiagram
+    participant Repo as Target Repo
+    participant Entry as aws_runner.py
+    participant Agent as agent.py
+
+    Note over Repo: Requirements:<br/>✓ Git initialized<br/>✓ Main branch exists
+
+    Entry->>Repo: Clone repository
+    Entry->>Entry: Create agent-runtime branch
+    Entry->>Entry: mkdir generated-app/ (empty)
+    Entry->>Entry: Install post-commit hook
+    Entry->>Agent: Start session
+    Agent->>Agent: Read BUILD_PLAN.md
+    Agent->>Agent: Build React app from scratch
+    Agent->>Repo: Auto-push commits
+```
+
+**Key points:**
+- Target repo needs only git initialized with a main branch
+- `frontend-scaffold-template/` is **not used** in GitHub mode (only local mode)
+- Agent creates empty `generated-app/` and builds everything from the `BUILD_PLAN.md` spec
+
+See [GitHub Mode Setup](docs/how-to/github-mode-setup.md) for detailed requirements and troubleshooting.
+
 ## Key Features
 
 - **Vote-based prioritization** - Issues with more 👍 reactions are built first
@@ -229,7 +258,7 @@ See [Configure GitHub Repository](docs/how-to/configure-github-repository.md) fo
 ### 4. Run Locally
 
 ```bash
-uv run python claude_code.py --project canopy
+uv run python agent.py --project canopy
 ```
 
 ## Documentation
@@ -249,8 +278,8 @@ Detailed how-to guides are available in the [`docs/how-to/`](docs/how-to/) direc
 ## Project Structure
 
 ```
-├── bedrock_entrypoint.py    # Main orchestrator for AWS Bedrock AgentCore
-├── claude_code.py           # Agent session manager and local runner
+├── aws_runner.py            # Main orchestrator for AWS Bedrock AgentCore
+├── agent.py                 # Agent session manager and local runner
 ├── src/                     # Python modules
 │   ├── cloudwatch_metrics.py  # Heartbeat and metrics
 │   ├── github_integration.py  # GitHub API operations
