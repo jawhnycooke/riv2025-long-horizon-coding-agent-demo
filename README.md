@@ -2,6 +2,46 @@
 
 An autonomous agent system that builds React applications from GitHub issues using AWS Bedrock AgentCore and the Claude Agent SDK. Demonstrated at AWS re:Invent 2025.
 
+> **📖 This project implements patterns from Anthropic's ["Effective Harnesses for Long-Running Agents"](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) article.**
+
+## About This Demo
+
+This project showcases **production patterns for long-horizon AI coding sessions**. The architecture implements a two-agent system (Orchestrator + Worker) that can autonomously build complete React applications across multi-hour sessions.
+
+### Key Patterns Implemented
+
+| Pattern | Implementation | Documentation |
+|---------|---------------|---------------|
+| **Feature List (JSON)** | `tests.json` with pass/fail status | [feature-list.md](docs/patterns/feature-list.md) |
+| **Progress Log** | `claude-progress.txt` for session continuity | [progress-tracking.md](docs/patterns/progress-tracking.md) |
+| **Git Recovery** | Commits as checkpoints + state machine | [session-recovery.md](docs/patterns/session-recovery.md) |
+| **Screenshot Verification** | Playwright workflow with security hooks | [verification.md](docs/patterns/verification.md) |
+
+### Two-Agent Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Orchestrator Agent                        │
+│  (Coordinates workflow, makes high-level decisions)          │
+│  - Reads tests.json, claude-progress.txt, git logs           │
+│  - Selects next feature to implement                         │
+│  - Delegates atomic tasks to Worker                          │
+│  - Manages session state and clean shutdown                  │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ Task tool
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Worker Agent                            │
+│  (Executes atomic tasks)                                     │
+│  - File operations (Read/Write/Edit)                         │
+│  - Bash commands (npm, playwright)                           │
+│  - Screenshot verification                                   │
+│  - Returns structured results                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+See [Pattern Documentation](docs/patterns/) for detailed explanations of each pattern.
+
 ## Architecture
 
 ### System Overview
@@ -263,7 +303,32 @@ uv run python agent.py --project canopy
 
 ## Documentation
 
-Detailed how-to guides are available in the [`docs/how-to/`](docs/how-to/) directory:
+### Pattern Documentation
+
+Learn how this project implements the patterns from Anthropic's article:
+
+| Document | Description |
+|----------|-------------|
+| [Pattern Overview](docs/patterns/README.md) | Introduction and architecture |
+| [Feature List Pattern](docs/patterns/feature-list.md) | How `tests.json` prevents cheating |
+| [Progress Tracking Pattern](docs/patterns/progress-tracking.md) | Session continuity with `claude-progress.txt` |
+| [Session Recovery Pattern](docs/patterns/session-recovery.md) | Git commits as recovery checkpoints |
+| [Verification Pattern](docs/patterns/verification.md) | Screenshot workflow with Playwright |
+
+### SDK Integration Examples
+
+Standalone examples demonstrating SDK usage:
+
+| Example | Description |
+|---------|-------------|
+| [basic-orchestrator.py](examples/basic-orchestrator.py) | Minimal orchestrator + worker pattern |
+| [with-sandbox.py](examples/with-sandbox.py) | SDK sandbox security settings |
+| [structured-outputs.py](examples/structured-outputs.py) | JSON schema validation |
+| [bedrock-integration.py](examples/bedrock-integration.py) | AWS Bedrock configuration |
+
+### How-To Guides
+
+Detailed setup guides in [`docs/how-to/`](docs/how-to/):
 
 | Guide | Description |
 |-------|-------------|
@@ -274,6 +339,7 @@ Detailed how-to guides are available in the [`docs/how-to/`](docs/how-to/) direc
 ### Additional Resources
 
 - [Infrastructure Deployment (CDK)](infrastructure/README.md) - Deploy AWS infrastructure
+- [Orchestrator Prompt](prompts/orchestrator_prompt.txt) - System prompt for orchestrator agent
 
 ## Project Structure
 
@@ -281,10 +347,34 @@ Detailed how-to guides are available in the [`docs/how-to/`](docs/how-to/) direc
 ├── aws_runner.py            # Main orchestrator for AWS Bedrock AgentCore
 ├── agent.py                 # Agent session manager and local runner
 ├── src/                     # Python modules
+│   ├── agents/              # SDK agent definitions
+│   │   ├── base.py          # BaseAgentDefinition class
+│   │   ├── worker.py        # Worker agent for atomic tasks
+│   │   └── orchestrator.py  # Orchestrator client creation
+│   ├── schemas/             # Structured output schemas
+│   │   ├── test_results.py  # Test verification schema
+│   │   ├── progress_report.py # Progress report schema
+│   │   └── build_artifacts.py # Build artifacts schema
+│   ├── sandbox.py           # SDK sandbox security settings
 │   ├── cloudwatch_metrics.py  # Heartbeat and metrics
 │   ├── github_integration.py  # GitHub API operations
 │   └── git_operations.py      # Git commit/push logic
+├── docs/
+│   ├── patterns/            # Pattern documentation (article mapping)
+│   │   ├── README.md        # Overview and architecture
+│   │   ├── feature-list.md  # tests.json pattern
+│   │   ├── progress-tracking.md  # claude-progress.txt pattern
+│   │   ├── session-recovery.md   # Git recovery pattern
+│   │   └── verification.md  # Screenshot workflow pattern
+│   └── how-to/              # Setup and configuration guides
+├── examples/                # SDK integration examples
+│   ├── basic-orchestrator.py  # Minimal two-agent pattern
+│   ├── with-sandbox.py      # Sandbox security settings
+│   ├── structured-outputs.py  # JSON schema validation
+│   └── bedrock-integration.py  # AWS Bedrock configuration
 ├── prompts/                 # Build plans and system prompts
+│   ├── system_prompt.txt    # Generic agent instructions
+│   ├── orchestrator_prompt.txt  # Orchestrator-specific prompt
 │   └── canopy/              # Project Management app build plan
 ├── frontend-scaffold-template/  # React + Vite + Tailwind scaffold
 └── .github/workflows/       # GitHub Actions
