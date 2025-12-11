@@ -81,5 +81,6 @@ epcc-*.md
 CLAUDE.md
 .claude/
 
-# Technical requirements (local planning)
+# Technical requirements and planning (local)
 TECH_REQ.md
+PRD.md
