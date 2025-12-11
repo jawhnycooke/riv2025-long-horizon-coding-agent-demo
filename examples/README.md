@@ -35,24 +35,18 @@ CLAUDE_CODE_USE_BEDROCK=1 python examples/bedrock-integration.py
 
 All examples follow the **Orchestrator + Worker** pattern from Anthropic's ["Effective Harnesses for Long-Running Agents"](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) article:
 
+```mermaid
+flowchart TB
+    O["🎯 Orchestrator Agent<br/><i>READ-ONLY</i><br/>Tools: Read, Glob, Grep, Task"]
+    W["⚙️ Worker Agent<br/><i>Executes tasks</i><br/>Tools: Read, Write, Edit, Bash"]
+
+    O -->|"Task tool"| W
+    W -->|"Results"| O
 ```
-┌─────────────────────────────────────────┐
-│           Orchestrator (sonnet)          │
-│  - Reads state (tests.json, progress)    │
-│  - Selects next task                     │
-│  - Delegates to Worker via Task tool     │
-│  - Maintains session continuity          │
-└─────────────────┬───────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────┐
-│            Worker (sonnet)               │
-│  - Executes atomic tasks                 │
-│  - File operations (Read/Write/Edit)     │
-│  - Shell commands (npm, git)             │
-│  - Returns structured results            │
-└─────────────────────────────────────────┘
-```
+
+**Orchestrator** (READ-ONLY): Reads state files, selects next task, delegates ALL modifications to Worker via Task tool.
+
+**Worker** (Subagent): Executes atomic tasks - file operations, shell commands, returns structured results.
 
 ## Key Patterns Demonstrated
 
@@ -80,11 +74,11 @@ class WorkerAgent:
 ### 2. Task Delegation
 
 ```python
-# Orchestrator delegates to Worker
-orchestrator_tools = ["Read", "Glob", "Grep", "Task"]  # Task tool for delegation
+# Orchestrator is READ-ONLY - delegates ALL modifications to Worker
+orchestrator_tools = ["Read", "Glob", "Grep", "Task"]  # No Write, Edit, or Bash
 
-# Worker executes
-worker_tools = ["Read", "Write", "Edit", "Bash"]  # Actual execution tools
+# Worker executes all modifications
+worker_tools = ["Read", "Write", "Edit", "Bash"]  # Full execution tools
 ```
 
 ### 3. Structured Outputs

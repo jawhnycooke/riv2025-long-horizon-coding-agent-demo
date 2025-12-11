@@ -21,20 +21,16 @@ This project showcases **production patterns for long-horizon AI coding sessions
 
 ```mermaid
 flowchart TB
-    subgraph Orchestrator["Orchestrator Agent (READ-ONLY)"]
-        direction TB
-        OTools["📖 Tools: Read, Glob, Grep, Task"]
-        OActions["• Reads tests.json, claude-progress.txt, git state<br/>• Selects next feature to implement<br/>• Delegates ALL modifications to Worker via Task tool<br/>• Manages session continuity and clean shutdown"]
-    end
+    O["🎯 Orchestrator Agent<br/><i>READ-ONLY</i><br/>Tools: Read, Glob, Grep, Task"]
+    W["⚙️ Worker Agent<br/><i>Executes tasks</i><br/>Tools: Read, Write, Edit, Bash"]
 
-    Orchestrator -->|"Task tool<br/>(required for all changes)"| Worker
-
-    subgraph Worker["Worker Agent (Subagent)"]
-        direction TB
-        WTools["🛠️ Tools: Read, Write, Edit, MultiEdit, Glob, Grep, Bash"]
-        WActions["• File operations and code modifications<br/>• Bash commands (npm, playwright, git, pwd)<br/>• Screenshot verification workflow<br/>• Returns structured results to Orchestrator"]
-    end
+    O -->|"Task tool"| W
+    W -->|"Results"| O
 ```
+
+**Orchestrator** (READ-ONLY): Reads state files, selects features, delegates ALL modifications to Worker via Task tool.
+
+**Worker** (Subagent): File operations, bash commands (npm, playwright), screenshot verification, returns structured results.
 
 See [Pattern Documentation](docs/patterns/) for detailed explanations of each pattern.
 

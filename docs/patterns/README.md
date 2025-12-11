@@ -24,26 +24,18 @@ This project implements these patterns to build React applications from GitHub i
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    O["🎯 Orchestrator Agent<br/><i>READ-ONLY</i><br/>Tools: Read, Glob, Grep, Task"]
+    W["⚙️ Worker Agent<br/><i>Executes tasks</i><br/>Tools: Read, Write, Edit, Bash"]
+
+    O -->|"Task tool"| W
+    W -->|"Results"| O
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Orchestrator Agent                        │
-│  (Coordinates workflow, makes high-level decisions)          │
-│  - Reads tests.json, claude-progress.txt, git logs           │
-│  - Selects next feature to implement                         │
-│  - Delegates atomic tasks to Worker                          │
-│  - Manages session state and clean shutdown                  │
-└─────────────────────┬───────────────────────────────────────┘
-                      │ Task tool
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Worker Agent                            │
-│  (Executes atomic tasks)                                     │
-│  - File operations (Read/Write/Edit)                         │
-│  - Bash commands (npm, playwright)                           │
-│  - Screenshot verification                                   │
-│  - Returns structured results                                │
-└─────────────────────────────────────────────────────────────┘
-```
+
+**Orchestrator** (READ-ONLY): Reads state files (`tests.json`, `claude-progress.txt`, git logs), selects next feature, delegates ALL modifications to Worker via Task tool, manages session state and clean shutdown.
+
+**Worker** (Subagent): File operations (Read/Write/Edit), bash commands (npm, playwright), screenshot verification, returns structured results.
 
 ## Session Startup Sequence
 
