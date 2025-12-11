@@ -1,241 +1,106 @@
 #!/usr/bin/env python3
-"""Orchestrator container entrypoint for two-container ECS architecture.
+"""Orchestrator - Intelligent coordinator with MCP tools.
 
-This orchestrator uses Claude Agent SDK to intelligently manage the issue-to-build
-workflow. It monitors GitHub for approved issues, claims them, and delegates
-the actual building work to Worker containers via AWS Step Functions.
+This orchestrator uses Claude Agent SDK with MCP servers for GitHub and AWS
+operations, enabling intelligent issue triage, prioritization, and monitoring.
 
 Architecture:
-    Orchestrator (this file) → Step Functions → Worker Container (claude_code_agent.py)
+    Orchestrator (Claude Agent SDK + MCP)
+        ├── GitHub MCP Server (issues, comments, labels)
+        ├── AWS MCP Server (Step Functions)
+        └── Built-in tools (heartbeat, wait)
 
 Responsibilities:
     - Poll GitHub for issues approved with 🚀 reaction
+    - Intelligent triage and prioritization
     - Claim issues by adding agent-building label
-    - Invoke Step Functions to start worker builds
-    - Monitor worker progress via Step Functions execution status
+    - Start Step Functions execution with issue_number
+    - Monitor worker progress
     - Post updates to GitHub issues
     - Publish CloudWatch heartbeat metrics
 
 Environment Variables:
     GITHUB_REPOSITORY: Target repo (e.g., "owner/repo")
-    GITHUB_TOKEN: GitHub PAT (from Secrets Manager)
-    ANTHROPIC_API_KEY: For Claude Agent SDK (from Secrets Manager)
+    GITHUB_TOKEN: GitHub PAT (for MCP server)
+    ANTHROPIC_API_KEY: For Claude Agent SDK
     STATE_MACHINE_ARN: Step Functions state machine ARN
     PROVIDER: "anthropic" or "bedrock"
     AUTHORIZED_APPROVERS: Comma-separated GitHub usernames who can approve
     ENVIRONMENT: Environment name for CloudWatch metrics
     POLL_INTERVAL_SECONDS: How often to poll for new issues (default: 300)
+    AWS_REGION: AWS region (default: us-west-2)
+    AWS_PROFILE: AWS profile for MCP server (default: default)
 """
 
-import json
 import os
 import time
 from datetime import UTC, datetime
 
-import boto3
-
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, tool
 
-from src import (
-    MetricsPublisher,
-    claim_issue_label,
-    get_anthropic_api_key,
-    get_approved_issues_simple,
-    get_github_token,
-    post_comment,
-    release_issue_label,
-)
+from src.cloudwatch_metrics import MetricsPublisher
 from src.config import Provider, apply_provider_config
+from src.secrets import get_anthropic_api_key
 
-# Configuration from environment
+# =============================================================================
+# Configuration
+# =============================================================================
+
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "300"))
 PROVIDER = os.environ.get("PROVIDER", "anthropic").lower()
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "reinvent")
+AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
 
-# Authorized approvers (can approve with 🚀)
 _approvers_env = os.environ.get("AUTHORIZED_APPROVERS", "")
-AUTHORIZED_APPROVERS = set(a.strip() for a in _approvers_env.split(",") if a.strip())
-
+AUTHORIZED_APPROVERS = [a.strip() for a in _approvers_env.split(",") if a.strip()]
 
 # =============================================================================
-# Claude Agent SDK Tools
+# MCP Server Configuration
 # =============================================================================
 
+MCP_SERVERS = {
+    "github": {
+        "command": "npx",
+        "args": [
+            "-y",
+            "@modelcontextprotocol/server-github"
+        ],
+        "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": os.environ.get("GITHUB_TOKEN", ""),
+        },
+    },
+    "aws": {
+        "command": "npx",
+        "args": [
+            "-y",
+            "@anthropic/mcp-server-aws",
+            "--region", AWS_REGION,
+        ],
+    },
+}
 
-@tool
-def get_approved_issues() -> list[dict]:
-    """Get all GitHub issues that have been approved with 🚀 reaction.
-
-    Returns a list of issues sorted by votes (highest first), then by
-    creation date (oldest first).
-
-    Returns:
-        List of approved issues with number, title, body, votes, and labels.
-    """
-    github_token = get_github_token(GITHUB_REPO)
-    if not github_token:
-        return {"error": "Failed to get GitHub token"}
-
-    issues = get_approved_issues_simple(
-        github_repo=GITHUB_REPO,
-        github_token=github_token,
-        authorized_approvers=AUTHORIZED_APPROVERS,
-    )
-    return issues
-
-
-@tool
-def claim_issue(issue_number: int) -> dict:
-    """Claim a GitHub issue by adding the agent-building label.
-
-    This prevents other orchestrator instances from picking up the same issue.
-
-    Args:
-        issue_number: The GitHub issue number to claim.
-
-    Returns:
-        Success or error status.
-    """
-    github_token = get_github_token(GITHUB_REPO)
-    if not github_token:
-        return {"error": "Failed to get GitHub token"}
-
-    success = claim_issue_label(
-        github_repo=GITHUB_REPO,
-        github_token=github_token,
-        issue_number=issue_number,
-    )
-    return {"success": success, "issue_number": issue_number}
-
-
-@tool
-def release_issue(issue_number: int, mark_complete: bool = False) -> dict:
-    """Release a GitHub issue by removing the agent-building label.
-
-    Optionally marks the issue as complete by adding agent-complete label.
-
-    Args:
-        issue_number: The GitHub issue number to release.
-        mark_complete: Whether to add agent-complete label.
-
-    Returns:
-        Success or error status.
-    """
-    github_token = get_github_token(GITHUB_REPO)
-    if not github_token:
-        return {"error": "Failed to get GitHub token"}
-
-    success = release_issue_label(
-        github_repo=GITHUB_REPO,
-        github_token=github_token,
-        issue_number=issue_number,
-        add_complete_label=mark_complete,
-    )
-    return {"success": success, "issue_number": issue_number}
-
-
-@tool
-def start_worker_build(issue_number: int) -> dict:
-    """Start a worker container to build the specified GitHub issue.
-
-    This invokes the Step Functions state machine which will run the worker
-    container via ECS RunTask.
-
-    Args:
-        issue_number: The GitHub issue number to build.
-
-    Returns:
-        Execution ARN if successful, error otherwise.
-    """
-    if not STATE_MACHINE_ARN:
-        return {"error": "STATE_MACHINE_ARN not configured"}
-
-    try:
-        sfn = boto3.client("stepfunctions")
-        response = sfn.start_execution(
-            stateMachineArn=STATE_MACHINE_ARN,
-            name=f"issue-{issue_number}-{int(time.time())}",
-            input=json.dumps({
-                "issue_number": issue_number,
-                "github_repo": GITHUB_REPO,
-                "provider": PROVIDER,
-                "environment": ENVIRONMENT,
-            }),
-        )
-        print(f"✅ Started worker build for issue #{issue_number}")
-        return {
-            "success": True,
-            "execution_arn": response["executionArn"],
-            "issue_number": issue_number,
-        }
-    except Exception as e:
-        print(f"❌ Failed to start worker build: {e}")
-        return {"error": str(e), "issue_number": issue_number}
-
-
-@tool
-def check_worker_status(execution_arn: str) -> dict:
-    """Check the status of a worker build.
-
-    Args:
-        execution_arn: The Step Functions execution ARN.
-
-    Returns:
-        Status information including RUNNING, SUCCEEDED, FAILED, etc.
-    """
-    try:
-        sfn = boto3.client("stepfunctions")
-        response = sfn.describe_execution(executionArn=execution_arn)
-        return {
-            "status": response["status"],
-            "start_date": response["startDate"].isoformat(),
-            "stop_date": response.get("stopDate", "").isoformat() if response.get("stopDate") else None,
-            "execution_arn": execution_arn,
-        }
-    except Exception as e:
-        return {"error": str(e), "execution_arn": execution_arn}
-
-
-@tool
-def post_issue_comment(issue_number: int, comment: str) -> dict:
-    """Post a comment to a GitHub issue.
-
-    Args:
-        issue_number: The GitHub issue number.
-        comment: The markdown comment to post.
-
-    Returns:
-        Success or error status.
-    """
-    github_token = get_github_token(GITHUB_REPO)
-    if not github_token:
-        return {"error": "Failed to get GitHub token"}
-
-    success = post_comment(
-        github_repo=GITHUB_REPO,
-        github_token=github_token,
-        issue_number=issue_number,
-        body=comment,
-    )
-    return {"success": success, "issue_number": issue_number}
+# =============================================================================
+# Built-in Tools (not MCP)
+# =============================================================================
 
 
 @tool
 def publish_heartbeat() -> dict:
-    """Publish a CloudWatch heartbeat metric.
+    """Publish a CloudWatch heartbeat metric indicating the orchestrator is alive.
 
-    This indicates the orchestrator is alive and running.
-    Should be called periodically (e.g., every 60 seconds).
+    Call this every 60 seconds during normal operation and during waits.
+    GitHub Actions monitors this to detect stale sessions.
 
     Returns:
-        Success status.
+        Success status with timestamp.
     """
     try:
         metrics = MetricsPublisher(enabled=True)
         success = metrics.publish_session_heartbeat()
-        return {"success": success}
+        timestamp = datetime.now(UTC).isoformat()
+        return {"success": success, "timestamp": timestamp}
     except Exception as e:
         return {"error": str(e)}
 
@@ -244,64 +109,234 @@ def publish_heartbeat() -> dict:
 def wait_seconds(seconds: int) -> dict:
     """Wait for a specified number of seconds.
 
-    Use this between polling cycles to avoid rate limiting.
+    Use this between polling cycles. Remember to publish_heartbeat()
+    before and after long waits.
 
     Args:
         seconds: Number of seconds to wait (max 600).
 
     Returns:
-        Confirmation of wait completion.
+        Confirmation with actual wait time.
     """
-    wait_time = min(seconds, 600)  # Cap at 10 minutes
-    print(f"⏳ Waiting {wait_time} seconds...")
+    wait_time = min(seconds, 600)
     time.sleep(wait_time)
-    return {"waited_seconds": wait_time}
+    return {"waited_seconds": wait_time, "timestamp": datetime.now(UTC).isoformat()}
 
 
 # =============================================================================
-# Orchestrator System Prompt
+# System Prompt - Goal-Oriented
 # =============================================================================
 
-ORCHESTRATOR_PROMPT = """You are an Orchestrator agent that manages GitHub issue builds.
+SYSTEM_PROMPT = f"""You are an intelligent Orchestrator that coordinates GitHub issue builds.
 
-## Your Role
-You coordinate the issue-to-build workflow by:
-1. Polling GitHub for approved issues (🚀 reaction from authorized approvers)
-2. Claiming issues (adding agent-building label)
-3. Starting worker containers via Step Functions
-4. Monitoring build progress
-5. Posting updates to GitHub issues
-6. Publishing heartbeat metrics
+## Your Mission
+Ensure approved issues get built efficiently while keeping users informed and making smart decisions about what to build and when.
 
-## Workflow
+## Repository Context
+- Repository: {GITHUB_REPO}
+- Environment: {ENVIRONMENT}
+- Authorized approvers: {', '.join(AUTHORIZED_APPROVERS) if AUTHORIZED_APPROVERS else '(none configured)'}
+- Approval signal: 🚀 reaction from an authorized approver
+- Building label: `agent-building`
+- Complete label: `agent-complete`
+- Step Functions ARN: {STATE_MACHINE_ARN}
 
-### Main Loop
-1. **Check for approved issues**: Call get_approved_issues()
-2. **If issues found**:
-   - Select the highest priority issue (first in list = most votes)
-   - Claim it with claim_issue(issue_number)
-   - Post a comment: "🤖 Starting build..."
-   - Start the worker: start_worker_build(issue_number)
-   - Monitor progress with check_worker_status(execution_arn)
-3. **If no issues**: Wait for poll interval
-4. **Always**: Publish heartbeat every 60 seconds
+## Available Tools
 
-### On Worker Completion
-- If SUCCEEDED: release_issue(issue_number, mark_complete=True)
-- If FAILED: release_issue(issue_number, mark_complete=False), post error comment
+### GitHub MCP Server
+You have full access to GitHub operations via the GitHub MCP server:
+- **List issues**: Get open issues, filter by labels, check reactions
+- **Read issue details**: Body, comments, metadata, linked issues
+- **Post comments**: Keep users informed of progress
+- **Manage labels**: Add/remove `agent-building`, `agent-complete`
+- **Check reactions**: See who approved with 🚀
 
-### Error Handling
-- If claim fails: Skip issue, try next one
-- If worker start fails: Release issue, post error comment
-- Always continue the main loop
+### AWS MCP Server
+You have access to AWS Step Functions via the AWS MCP server:
+- **Start execution**: Launch worker builds with issue context
+- **Describe execution**: Check if RUNNING, SUCCEEDED, FAILED
+- **List executions**: See all running/recent executions
 
-## Important
-- Only process ONE issue at a time
-- Always publish heartbeat during waits
-- Be resilient to transient errors
-- Post informative comments to keep users updated
+### Built-in Tools
+- `publish_heartbeat()` - Signal you're alive (call every 60s)
+- `wait_seconds(n)` - Pause between actions (max 600s)
+
+## Decision Framework
+
+### 1. Issue Discovery
+Find issues that are ready to build:
+- Open issues with 🚀 reaction from authorized approvers
+- NOT already labeled `agent-building` or `agent-complete`
+
+### 2. Prioritization (Use Your Judgment)
+When multiple issues are approved, consider:
+- **Votes**: More 🚀 reactions = higher demand
+- **Age**: Older issues have been waiting longer
+- **Type**: Bugs before features? Depends on severity
+- **Complexity**: Read the issue body, estimate effort
+- **Dependencies**: Does it reference other issues?
+- **Clarity**: Is it well-defined enough to build?
+
+### 3. Triage (Before Claiming)
+Before starting a build, assess the issue:
+- Is the request clear and actionable?
+- Does it have enough detail for the worker to build?
+- Is it a duplicate of another open/closed issue?
+- Are there unresolved questions in the comments?
+
+If the issue is unclear:
+- Post a comment asking for clarification
+- Do NOT claim it yet
+- Move to the next issue
+
+### 4. Building
+When you claim an issue:
+1. Add `agent-building` label
+2. Post a comment explaining what you understood and what will be built
+3. Start Step Functions execution with:
+   - issue_number
+   - github_repo: {GITHUB_REPO}
+   - provider: {PROVIDER}
+   - environment: {ENVIRONMENT}
+
+### 5. Monitoring
+While a worker is running:
+- Check status periodically (every 2-5 minutes)
+- Post progress updates to the issue if you can infer progress
+- Detect stuck builds (no activity for 30+ minutes)
+- Keep publishing heartbeats
+
+### 6. Completion Handling
+On SUCCESS:
+- Remove `agent-building` label
+- Add `agent-complete` label
+- Post a summary comment: what was built, branch name, how to test
+
+On FAILURE:
+- Remove `agent-building` label
+- Do NOT add `agent-complete`
+- Post a helpful comment explaining what went wrong
+- Suggest next steps (retry, clarify requirements, etc.)
+
+## Communication Guidelines
+
+Write GitHub comments that are:
+- **Concise**: Users don't want walls of text
+- **Informative**: Include relevant details
+- **Actionable**: Tell users what happens next
+- **Human-friendly**: You're representing the team
+
+### Comment Templates
+
+**Starting build:**
+```
+🤖 **Starting Build**
+
+I understood this issue as: [one sentence summary]
+
+Building on branch `agent-runtime`. I'll post updates as progress is made.
+```
+
+**Progress update:**
+```
+📊 **Progress Update**
+
+[What's been done so far]
+
+Estimated time remaining: [if you can estimate]
+```
+
+**Build complete:**
+```
+✅ **Build Complete**
+
+**What was built:**
+- [bullet points]
+
+**Branch:** `agent-runtime`
+**To test:** [instructions if applicable]
+```
+
+**Build failed:**
+```
+❌ **Build Failed**
+
+**What went wrong:** [brief explanation]
+
+**Suggested next steps:**
+- [actionable suggestions]
+```
+
+**Needs clarification:**
+```
+🤔 **Clarification Needed**
+
+Before I can build this, could you clarify:
+- [specific question]
+
+I'll start the build once this is resolved.
+```
+
+## Constraints
+
+- Process ONE issue at a time
+- Always publish heartbeat every 60 seconds (especially during waits)
+- Be resilient to transient GitHub/AWS errors (retry once, then skip)
+- Never claim an issue you can't start building
+- Don't spam issues with comments - be thoughtful
+
+## Error Handling
+
+- GitHub API rate limit: Wait and retry
+- Step Functions start fails: Release issue, post error comment
+- Transient network errors: Retry once, then continue
+- Unknown errors: Log details, continue main loop
+
+## Main Loop Structure
+
+```
+while True:
+    publish_heartbeat()
+
+    if currently_monitoring_a_build:
+        check_status_and_handle_completion()
+    else:
+        issues = find_approved_issues()
+        if issues:
+            best_issue = prioritize_and_triage(issues)
+            if best_issue:
+                claim_and_start_build(best_issue)
+
+    wait_seconds(poll_interval)
+```
+
+Remember: You are an intelligent agent, not a script. Use judgment, communicate well, and ensure builds succeed.
 """
 
+# =============================================================================
+# Initial Prompt
+# =============================================================================
+
+INITIAL_PROMPT = f"""You are now running as the Orchestrator for repository {GITHUB_REPO}.
+
+**Current Configuration:**
+- Poll interval: {POLL_INTERVAL} seconds
+- Authorized approvers: {', '.join(AUTHORIZED_APPROVERS) if AUTHORIZED_APPROVERS else '(none configured)'}
+- Provider: {PROVIDER}
+- Environment: {ENVIRONMENT}
+
+**Your first actions:**
+1. Publish an initial heartbeat to signal you're online
+2. Check for any issues with `agent-building` label (might be stale from a crash)
+3. Look for approved issues (🚀 from authorized approvers)
+4. If found, triage and start building the best candidate
+5. If not found, wait for the poll interval
+6. Continue indefinitely
+
+**Important:** You have access to GitHub and AWS via MCP servers. Use the appropriate MCP tools for GitHub operations (listing issues, posting comments, managing labels) and AWS operations (Step Functions).
+
+Begin now.
+"""
 
 # =============================================================================
 # Main Entry Point
@@ -309,7 +344,8 @@ You coordinate the issue-to-build workflow by:
 
 
 def create_orchestrator_client() -> ClaudeSDKClient:
-    """Create the Claude Agent SDK client for the orchestrator."""
+    """Create the Claude Agent SDK client with MCP servers."""
+
     # Apply provider configuration
     if PROVIDER == "bedrock":
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
@@ -326,17 +362,15 @@ def create_orchestrator_client() -> ClaudeSDKClient:
     return ClaudeSDKClient(
         options=ClaudeAgentOptions(
             model="claude-sonnet-4-20250514",
-            system_prompt=ORCHESTRATOR_PROMPT,
+            system_prompt=SYSTEM_PROMPT,
+            # MCP servers provide GitHub and AWS tools
+            mcp_servers=MCP_SERVERS,
+            # Built-in tools + MCP tools
             allowed_tools=[
-                "think",
-                "get_approved_issues",
-                "claim_issue",
-                "release_issue",
-                "start_worker_build",
-                "check_worker_status",
-                "post_issue_comment",
-                "publish_heartbeat",
-                "wait_seconds",
+                "mcp__github__*",      # All GitHub MCP tools
+                "mcp__aws__*",         # All AWS MCP tools
+                "publish_heartbeat",   # Built-in
+                "wait_seconds",        # Built-in
             ],
             max_turns=10000,  # Long-running orchestrator
         )
@@ -346,58 +380,47 @@ def create_orchestrator_client() -> ClaudeSDKClient:
 def main():
     """Main entry point for the orchestrator."""
     print("=" * 60)
-    print("🎯 Orchestrator Container Starting")
+    print("🎯 Orchestrator - Intelligent Coordinator with MCP")
     print("=" * 60)
     print(f"📦 Repository: {GITHUB_REPO}")
     print(f"🔧 Provider: {PROVIDER}")
     print(f"⏱️  Poll interval: {POLL_INTERVAL}s")
     print(f"👥 Authorized approvers: {AUTHORIZED_APPROVERS}")
+    print(f"🔌 MCP Servers: GitHub, AWS")
+    print(f"🌍 AWS Region: {AWS_REGION}")
     print("=" * 60)
 
     # Validate configuration
+    errors = []
     if not GITHUB_REPO:
-        print("❌ GITHUB_REPOSITORY not set")
-        return 1
-
+        errors.append("GITHUB_REPOSITORY not set")
     if not STATE_MACHINE_ARN:
-        print("❌ STATE_MACHINE_ARN not set")
-        return 1
-
+        errors.append("STATE_MACHINE_ARN not set")
     if not AUTHORIZED_APPROVERS:
-        print("❌ AUTHORIZED_APPROVERS not set")
+        errors.append("AUTHORIZED_APPROVERS not set")
+    if not os.environ.get("GITHUB_TOKEN"):
+        errors.append("GITHUB_TOKEN not set")
+
+    if errors:
+        for err in errors:
+            print(f"❌ {err}")
         return 1
 
-    # Create client and start the main loop
+    # Create client and start
+    print("\n🚀 Starting orchestrator agent...")
     client = create_orchestrator_client()
 
-    # Initial prompt to start the orchestrator loop
-    initial_prompt = f"""You are now running as the Orchestrator.
-
-Configuration:
-- Repository: {GITHUB_REPO}
-- Provider: {PROVIDER}
-- Poll interval: {POLL_INTERVAL} seconds
-- Environment: {ENVIRONMENT}
-
-Start the main orchestration loop:
-1. Publish an initial heartbeat
-2. Check for approved issues
-3. If found, process the highest priority issue
-4. If not found, wait for the poll interval
-5. Repeat indefinitely
-
-Begin now."""
-
     try:
-        # Run the orchestrator
-        result = client.send_message(initial_prompt)
+        result = client.process(INITIAL_PROMPT)
         print(f"\n📋 Orchestrator finished: {result}")
         return 0
     except KeyboardInterrupt:
-        print("\n⚠️ Orchestrator interrupted")
+        print("\n⚠️ Orchestrator interrupted by user")
         return 0
     except Exception as e:
         print(f"\n❌ Orchestrator error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 

@@ -1,23 +1,32 @@
 # Worker Container
 # Full build environment for executing GitHub issue builds
 #
+# Architecture: Harness-Enforced Agent Pattern
+# (Based on Anthropic's "Effective Harnesses for Long-Running Agents")
+#
+# The harness (Python) wraps the agent (Claude SDK) and enforces:
+# - ONE test per session (prevents incomplete implementation)
+# - Screenshot verification (prevents inadequate testing)
+# - Completion validation (prevents premature completion)
+# - Environment setup (prevents inefficient onboarding)
+#
 # Responsibilities:
 # - Clone repository and set up git branches
-# - Build React applications following BUILD_PLAN.md
-# - Take screenshots using Playwright
-# - Run tests and verify implementations
+# - Run init.sh and smoke tests before agent starts
+# - Select ONE failing test for the agent to implement
+# - Run Claude agent with Playwright MCP for browser automation
+# - Validate completion via tests.json (harness decides, not agent)
 # - Commit and push changes to git
-# - Exit with success/failure code
+# - Exit with appropriate status code
 
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
-# Install system dependencies for Playwright, git operations, and React builds
+# Install system dependencies including Node.js 20 for MCP servers
 # Also includes Chromium dependencies for Playwright headless browser
 RUN apt-get update && apt-get install -y \
     git \
     curl \
-    nodejs \
-    npm \
+    gnupg \
     procps \
     lsof \
     ripgrep \
@@ -39,7 +48,12 @@ RUN apt-get update && apt-get install -y \
     libgbm1 \
     libasound2 \
     libxshmfence1 \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Verify Node.js installation (required for MCP servers)
+RUN node --version && npm --version
 
 WORKDIR /app
 
@@ -48,6 +62,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy worker application code
+# worker_main.py - Harness-based entry point (preferred)
+# claude_code_agent.py - Legacy entry point (backward compatibility)
+COPY worker_main.py .
 COPY claude_code_agent.py .
 COPY src/ ./src/
 COPY prompts/ ./prompts/
@@ -69,10 +86,22 @@ ENV PYTHONUNBUFFERED=1
 ENV WORKER_MODE=true
 
 # The worker is invoked with environment variables:
+# Required:
 # - ISSUE_NUMBER: GitHub issue number to build
 # - GITHUB_REPOSITORY: Target repo (e.g., "owner/repo")
-# - PROVIDER: "anthropic" or "bedrock"
-# - ENVIRONMENT: Environment name for secrets lookup
+# Optional:
+# - AGENT_BRANCH: Git branch (default: agent-runtime)
+# - PROVIDER: "anthropic" or "bedrock" (default: anthropic)
+# - ENVIRONMENT: Environment name for secrets lookup (default: reinvent)
+# - MAX_RETRIES_PER_TEST: Max retries per test (default: 3)
+# - SMOKE_TEST_TIMEOUT: Smoke test timeout seconds (default: 30)
+# - DEV_SERVER_PORT: Development server port (default: 6174)
 
-# Run the worker in worker mode
-CMD ["python", "claude_code_agent.py", "--worker-mode"]
+# Exit Codes:
+# 0 - CONTINUE: Test passed, more tests remain
+# 1 - COMPLETE: All tests pass
+# 2 - FAILED: Unrecoverable error
+# 3 - BROKEN_STATE: Smoke test failed
+
+# Run the harness-based worker
+CMD ["python", "worker_main.py"]
