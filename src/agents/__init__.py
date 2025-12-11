@@ -1,40 +1,37 @@
-"""Agent definitions for Orchestrator + Worker architecture.
+"""Agent client factory for Claude SDK.
 
-This module implements the two-agent pattern from Anthropic's
-"Effective Harnesses for Long-Running Agents" article:
-https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
-
-Architecture:
-    Orchestrator (sonnet) - Coordinates workflow, reads state, delegates tasks
-    Worker (sonnet) - Executes atomic tasks (file ops, bash, testing)
+This module provides the create_agent_client function for creating
+a configured ClaudeSDKClient with security hooks and tracing.
 """
 
 from src.agents.base import BaseAgentDefinition
-from src.agents.worker import WorkerAgent, WORKER_PROMPT
 
-# Lazy import for orchestrator to avoid import errors when claude_sdk not installed
-def create_orchestrator_client(*args, **kwargs):
-    """Create and configure the Orchestrator agent with Worker subagent.
+
+# Lazy import to avoid import errors when claude_sdk not installed
+def create_agent_client(*args, **kwargs):
+    """Create and configure the Claude agent client.
 
     Lazy import wrapper to avoid module-level import of claude_sdk.
     """
-    from src.agents.orchestrator import create_orchestrator_client as _create
+    from src.agents.orchestrator import create_agent_client as _create
     return _create(*args, **kwargs)
+
+
+# Backward compatibility aliases
+def create_orchestrator_client(*args, **kwargs):
+    """Deprecated: Use create_agent_client instead."""
+    return create_agent_client(*args, **kwargs)
 
 
 def create_legacy_client(*args, **kwargs):
-    """Create the original monolithic client without subagents.
-
-    Lazy import wrapper to avoid module-level import of claude_sdk.
-    """
-    from src.agents.orchestrator import create_legacy_client as _create
-    return _create(*args, **kwargs)
+    """Deprecated: Use create_agent_client instead."""
+    return create_agent_client(*args, **kwargs)
 
 
 __all__ = [
     "BaseAgentDefinition",
-    "WorkerAgent",
-    "WORKER_PROMPT",
+    "create_agent_client",
+    # Backward compatibility
     "create_orchestrator_client",
     "create_legacy_client",
 ]

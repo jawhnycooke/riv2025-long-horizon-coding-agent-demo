@@ -1,9 +1,9 @@
 # Product Requirement Document: Claude Agent SDK Modernization
 
 **Created**: 2025-12-10
-**Version**: 2.0 (Implemented)
+**Version**: 3.0 (Simplified)
 **Status**: Complete
-**Complexity**: Medium
+**Complexity**: Low
 
 ---
 
@@ -11,62 +11,49 @@
 
 This project demonstrates **production patterns for long-horizon AI coding sessions** using the Claude Agent SDK and AWS Bedrock AgentCore. The architecture implements patterns from Anthropic's ["Effective Harnesses for Long-Running Agents"](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) article.
 
-## What Was Built
+## Architecture
 
-### Two-Agent Architecture (Orchestrator + Worker)
+### Single Agent Design
 
-```mermaid
-flowchart TB
-    O["🎯 Orchestrator Agent<br/><i>READ-ONLY</i><br/>Tools: Read, Glob, Grep, Task"]
-    W["⚙️ Worker Agent<br/><i>Executes tasks</i><br/>Tools: Read, Write, Edit, Bash"]
-
-    O -->|"Task tool"| W
-    W -->|"Results"| O
-```
-
-**Orchestrator** (READ-ONLY): Reads state files (`tests.json`, `claude-progress.txt`, git logs), selects next feature, delegates ALL modifications to Worker via Task tool.
-
-**Worker** (Subagent): Executes atomic tasks - file operations, bash commands (npm, playwright), screenshot verification.
-
-### System Architecture
+The architecture uses a single Claude agent with full capabilities, managed by a Python session manager:
 
 ```mermaid
 flowchart TB
-    subgraph AWS["AWS Cloud"]
-        subgraph AgentCore["Bedrock AgentCore (ECS Fargate)"]
-            Entrypoint["aws_runner.py<br/>(Runtime Entrypoint)"]
-            Agent["agent.py<br/>(Session Manager)"]
-            subgraph SDK["Claude Agent SDK"]
-                Orch["🎯 Orchestrator<br/>(READ-ONLY)"]
-                Worker["⚙️ Worker<br/>(Executes tasks)"]
-            end
-        end
-    end
+    SessionMgr["agent.py<br/>(Session Manager)"]
+    Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
+    Files["📁 State Files<br/>tests.json, claude-progress.txt"]
+    Git["📦 Git<br/>Commits as checkpoints"]
 
-    Entrypoint -->|"spawns subprocess"| Agent
-    Agent -->|"creates client"| SDK
-    Orch -->|"Task tool"| Worker
+    SessionMgr -->|"creates"| Claude
+    Claude -->|"reads/writes"| Files
+    Claude -->|"commits"| Git
 ```
 
-### Key Relationships
+### Key Components
 
-| Component | Role | Relationship |
-|-----------|------|--------------|
-| `aws_runner.py` | Runtime Entrypoint | Spawns `agent.py` as subprocess |
-| `agent.py` | Session Manager | Creates Claude SDK client with two-agent architecture |
-| Orchestrator | Coordinator | READ-ONLY, delegates via Task tool |
-| Worker | Executor | Performs all file/bash operations |
+| Component | Role |
+|-----------|------|
+| `aws_runner.py` | Runtime entrypoint (spawns agent.py as subprocess) |
+| `agent.py` | Session manager (creates SDK client, manages state) |
+| Claude Agent | Implements features, runs tests, commits changes |
+
+### Why Single Agent?
+
+The original design included an Orchestrator + Worker pattern, but this added unnecessary complexity:
+
+1. **Session management is already handled by `agent.py`** - State machine, completion detection, GitHub integration
+2. **No benefit to separating read/write** - The agent needs full tool access to implement features
+3. **Simpler is better** - Fewer moving parts means easier debugging and maintenance
 
 ## Implemented Features
 
-### ✅ F031: SDK Agent Architecture
-- `src/agents/base.py` - BaseAgentDefinition class
-- `src/agents/worker.py` - WorkerAgent definition
-- `src/agents/orchestrator.py` - create_orchestrator_client()
-- Two-agent pattern: Orchestrator (READ-ONLY) + Worker
+### ✅ F031: SDK Agent Architecture (Simplified)
+- `src/agents/orchestrator.py` - `create_agent_client()` function
+- Single agent with full tool access
+- Security hooks for path validation and command restrictions
 
 ### ✅ F032: SDK Sandbox Security (Foundation)
-- `src/sandbox.py` - get_sandbox_settings()
+- `src/sandbox.py` - `get_sandbox_settings()`
 - SandboxSettings configuration
 - Existing hooks preserved for validation
 
@@ -83,71 +70,17 @@ flowchart TB
 - `docs/patterns/verification.md` - Screenshot workflow pattern
 
 ### ✅ F035: SDK Integration Examples
-- `examples/basic-orchestrator.py` - Minimal two-agent pattern
+- `examples/basic-agent.py` - Minimal agent with security hooks
 - `examples/with-sandbox.py` - SDK SandboxSettings usage
 - `examples/structured-outputs.py` - JSON schema validation
 - `examples/bedrock-integration.py` - AWS Bedrock configuration
 
-### ✅ F036: Orchestrator Prompt
-- `prompts/orchestrator_prompt.txt` - Coordination system prompt
+### ✅ F036: System Prompt
+- Uses existing `prompts/system_prompt.txt`
 
 ### ✅ F037: README Demo Showcase
-- Architecture diagrams showing article patterns
-- "About This Demo" section linking to article
+- Architecture diagrams showing patterns
 - Pattern documentation links
-
-## What Is NOT Implemented
-
-The following from the original v1.0 PRD were **intentionally descoped**:
-
-| Original Feature | Status | Reason |
-|-----------------|--------|--------|
-| 4+ specialized subagents | ❌ Not implemented | Two-agent pattern is simpler and sufficient |
-| Parallel subagent execution | ❌ Not implemented | Sequential delegation works for current needs |
-| Research subagent (haiku) | ❌ Not implemented | Worker handles all tasks |
-| Code review subagent | ❌ Not implemented | Worker handles all tasks |
-| Dynamic agent scaling | ❌ Not implemented | Future enhancement if needed |
-
-## Implementation Files
-
-### New Files Created
-
-```
-src/agents/
-    __init__.py           # Export agent definitions
-    base.py               # BaseAgentDefinition dataclass
-    worker.py             # WorkerAgent definition + prompt
-    orchestrator.py       # create_orchestrator_client()
-
-src/schemas/
-    __init__.py           # Export schemas
-    test_results.py       # TEST_RESULTS_SCHEMA
-    progress_report.py    # PROGRESS_REPORT_SCHEMA
-    build_artifacts.py    # BUILD_ARTIFACTS_SCHEMA
-
-src/sandbox.py            # get_sandbox_settings()
-
-prompts/
-    orchestrator_prompt.txt  # Orchestrator system prompt
-
-docs/patterns/
-    README.md             # Pattern overview
-    feature-list.md       # tests.json pattern
-    progress-tracking.md  # claude-progress.txt pattern
-    session-recovery.md   # Git recovery pattern
-    verification.md       # Screenshot workflow pattern
-
-examples/
-    README.md             # Examples overview
-    basic-orchestrator.py # Two-agent pattern
-    with-sandbox.py       # Sandbox settings
-    structured-outputs.py # JSON schemas
-    bedrock-integration.py # AWS Bedrock
-```
-
-### Modified Files
-
-- `agent.py` - Updated `_create_claude_client()` to use orchestrator pattern
 
 ## Article Pattern Mapping
 
@@ -159,8 +92,7 @@ examples/
 | **Git Recovery** | Post-commit hooks, auto-push | `src/git_manager.py` |
 | **Session Startup** | State machine reads progress | `agent.py` |
 | **E2E Testing** | Playwright screenshot verification | `src/security.py` |
-| **Two-Agent Pattern** | Orchestrator + Worker | `src/agents/` |
 
 ---
 
-**End of PRD v2.0**
+**End of PRD v3.0**

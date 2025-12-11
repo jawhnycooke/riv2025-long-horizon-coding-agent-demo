@@ -4,14 +4,12 @@ This documentation maps how this project implements the patterns from Anthropic'
 
 ## Overview
 
-The article recommends a **two-agent architecture** for long-horizon coding sessions:
+This project implements the patterns from the article to build React applications from GitHub issues autonomously. The article recommends key infrastructure for long-horizon coding sessions:
 
-| Agent | Role | When Used |
-|-------|------|-----------|
-| **Initializer** | Sets up environment, creates `init.sh`, establishes baseline | First session only |
-| **Coding Agent** | Incremental feature development, reads progress, leaves clean state | Subsequent sessions |
-
-This project implements these patterns to build React applications from GitHub issues autonomously.
+- **Feature list** (`tests.json`) - JSON file with pass/fail status to prevent cheating
+- **Progress log** (`claude-progress.txt`) - Chronological log for context recovery
+- **Init script** (`init.sh`) - Development server startup for session continuity
+- **Git commits** - Recovery points for state history
 
 ## Pattern Index
 
@@ -26,16 +24,19 @@ This project implements these patterns to build React applications from GitHub i
 
 ```mermaid
 flowchart TB
-    O["🎯 Orchestrator Agent<br/><i>READ-ONLY</i><br/>Tools: Read, Glob, Grep, Task"]
-    W["⚙️ Worker Agent<br/><i>Executes tasks</i><br/>Tools: Read, Write, Edit, Bash"]
+    SessionMgr["agent.py<br/>(Session Manager)"]
+    Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
+    Files["📁 State Files<br/>tests.json, claude-progress.txt"]
+    Git["📦 Git<br/>Commits as checkpoints"]
 
-    O -->|"Task tool"| W
-    W -->|"Results"| O
+    SessionMgr -->|"creates"| Claude
+    Claude -->|"reads/writes"| Files
+    Claude -->|"commits"| Git
 ```
 
-**Orchestrator** (READ-ONLY): Reads state files (`tests.json`, `claude-progress.txt`, git logs), selects next feature, delegates ALL modifications to Worker via Task tool, manages session state and clean shutdown.
+**Session Manager** (`agent.py`): Manages session lifecycle, state machine, completion detection.
 
-**Worker** (Subagent): File operations (Read/Write/Edit), bash commands (npm, playwright), screenshot verification, returns structured results.
+**Claude Agent**: Reads state files, implements features, runs tests, commits changes.
 
 ## Session Startup Sequence
 

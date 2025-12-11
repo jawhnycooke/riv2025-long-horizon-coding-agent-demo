@@ -6,7 +6,7 @@ An autonomous agent system that builds React applications from GitHub issues usi
 
 ## About This Demo
 
-This project showcases **production patterns for long-horizon AI coding sessions**. The architecture implements a two-agent system (Orchestrator + Worker) that can autonomously build complete React applications across multi-hour sessions.
+This project showcases **production patterns for long-horizon AI coding sessions** that can autonomously build complete React applications across multi-hour sessions.
 
 ### Key Patterns Implemented
 
@@ -16,21 +16,6 @@ This project showcases **production patterns for long-horizon AI coding sessions
 | **Progress Log** | `claude-progress.txt` for session continuity | [progress-tracking.md](docs/patterns/progress-tracking.md) |
 | **Git Recovery** | Commits as checkpoints + state machine | [session-recovery.md](docs/patterns/session-recovery.md) |
 | **Screenshot Verification** | Playwright workflow with security hooks | [verification.md](docs/patterns/verification.md) |
-
-### Two-Agent Architecture
-
-```mermaid
-flowchart TB
-    O["🎯 Orchestrator Agent<br/><i>READ-ONLY</i><br/>Tools: Read, Glob, Grep, Task"]
-    W["⚙️ Worker Agent<br/><i>Executes tasks</i><br/>Tools: Read, Write, Edit, Bash"]
-
-    O -->|"Task tool"| W
-    W -->|"Results"| O
-```
-
-**Orchestrator** (READ-ONLY): Reads state files, selects features, delegates ALL modifications to Worker via Task tool.
-
-**Worker** (Subagent): File operations, bash commands (npm, playwright), screenshot verification, returns structured results.
 
 See [Pattern Documentation](docs/patterns/) for detailed explanations of each pattern.
 
@@ -49,11 +34,8 @@ flowchart TB
     subgraph AWS["AWS Cloud"]
         subgraph AgentCore["Bedrock AgentCore (ECS Fargate)"]
             Entrypoint["aws_runner.py<br/>(Runtime Entrypoint)"]
-            Agent["agent.py<br/>(Session Manager)"]
-            subgraph SDK["Claude Agent SDK"]
-                Orch["🎯 Orchestrator<br/>(READ-ONLY)"]
-                Worker["⚙️ Worker<br/>(Executes tasks)"]
-            end
+            SessionMgr["agent.py<br/>(Session Manager)"]
+            Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
         end
 
         EFS["EFS<br/>(Persistent Storage)"]
@@ -73,17 +55,16 @@ flowchart TB
     Actions -->|"Invoke"| AgentCore
     AgentCore --> EFS
     AgentCore --> ECR
-    Entrypoint -->|"spawns"| Agent
-    Agent -->|"creates client"| SDK
-    Orch -->|"Task tool"| Worker
-    Agent -->|"Heartbeat"| CW
+    Entrypoint -->|"spawns"| SessionMgr
+    SessionMgr -->|"creates"| Claude
+    SessionMgr -->|"Heartbeat"| CW
     Entrypoint -->|"Fetch secrets"| SM
-    Agent -->|"Update labels"| Labels
-    Agent -->|"Post comments"| Issues
+    SessionMgr -->|"Update labels"| Labels
+    SessionMgr -->|"Post comments"| Issues
     Actions -->|"Deploy"| S3
     S3 --> CF
 
-    CLI -->|"runs directly"| Agent
+    CLI -->|"runs directly"| SessionMgr
     Config --> CLI
 ```
 

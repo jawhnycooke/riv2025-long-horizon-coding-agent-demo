@@ -16,7 +16,7 @@ export ANTHROPIC_API_KEY="your-key-here"
 
 | Example | Description | Key Concepts |
 |---------|-------------|--------------|
-| [basic-orchestrator.py](./basic-orchestrator.py) | Minimal orchestrator + worker pattern | Two-agent architecture, task delegation |
+| [basic-agent.py](./basic-agent.py) | Minimal agent with security hooks | Agent creation, tool restrictions |
 | [with-sandbox.py](./with-sandbox.py) | SDK sandbox security settings | Path restrictions, command allowlists |
 | [structured-outputs.py](./structured-outputs.py) | JSON schema validation | Output formatting, type safety |
 | [bedrock-integration.py](./bedrock-integration.py) | AWS Bedrock AgentCore | Cross-region inference, IAM auth |
@@ -25,7 +25,7 @@ export ANTHROPIC_API_KEY="your-key-here"
 
 ```bash
 # Run any example
-python examples/basic-orchestrator.py
+python examples/basic-agent.py
 
 # Run with Bedrock instead of Anthropic API
 CLAUDE_CODE_USE_BEDROCK=1 python examples/bedrock-integration.py
@@ -33,55 +33,40 @@ CLAUDE_CODE_USE_BEDROCK=1 python examples/bedrock-integration.py
 
 ## Architecture Overview
 
-All examples follow the **Orchestrator + Worker** pattern from Anthropic's ["Effective Harnesses for Long-Running Agents"](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) article:
+These examples demonstrate patterns from Anthropic's ["Effective Harnesses for Long-Running Agents"](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) article:
 
 ```mermaid
 flowchart TB
-    O["🎯 Orchestrator Agent<br/><i>READ-ONLY</i><br/>Tools: Read, Glob, Grep, Task"]
-    W["⚙️ Worker Agent<br/><i>Executes tasks</i><br/>Tools: Read, Write, Edit, Bash"]
+    SessionMgr["Session Manager"]
+    Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
+    Files["📁 State Files"]
+    Git["📦 Git"]
 
-    O -->|"Task tool"| W
-    W -->|"Results"| O
+    SessionMgr -->|"creates"| Claude
+    Claude -->|"reads/writes"| Files
+    Claude -->|"commits"| Git
 ```
-
-**Orchestrator** (READ-ONLY): Reads state files, selects next task, delegates ALL modifications to Worker via Task tool.
-
-**Worker** (Subagent): Executes atomic tasks - file operations, shell commands, returns structured results.
 
 ## Key Patterns Demonstrated
 
-### 1. Agent Definitions
+### 1. Agent Creation with Security Hooks
 
 ```python
-from dataclasses import dataclass
+from claude_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
 
-@dataclass
-class WorkerAgent:
-    name: str = "worker"
-    description: str = "Executes atomic development tasks"
-    model: str = "sonnet"
-    tools: list = ("Read", "Write", "Edit", "Bash")
-
-    def to_sdk_definition(self) -> dict:
-        return {
-            "description": self.description,
-            "prompt": WORKER_PROMPT,
-            "tools": list(self.tools),
-            "model": self.model,
-        }
+client = ClaudeSDKClient(
+    options=ClaudeAgentOptions(
+        model="claude-sonnet-4-20250514",
+        system_prompt=system_prompt,
+        allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        hooks={
+            "PreToolUse": [HookMatcher(matcher="*", hooks=[security_hook])],
+        },
+    )
+)
 ```
 
-### 2. Task Delegation
-
-```python
-# Orchestrator is READ-ONLY - delegates ALL modifications to Worker
-orchestrator_tools = ["Read", "Glob", "Grep", "Task"]  # No Write, Edit, or Bash
-
-# Worker executes all modifications
-worker_tools = ["Read", "Write", "Edit", "Bash"]  # Full execution tools
-```
-
-### 3. Structured Outputs
+### 2. Structured Outputs
 
 ```python
 TEST_RESULTS_SCHEMA = {
@@ -101,7 +86,7 @@ These examples are simplified versions of the patterns used in the main project:
 
 | Example | Main Project Equivalent |
 |---------|------------------------|
-| `basic-orchestrator.py` | `src/agents/orchestrator.py` |
+| `basic-agent.py` | `src/agents/orchestrator.py` |
 | `with-sandbox.py` | `src/sandbox.py` |
 | `structured-outputs.py` | `src/schemas/*.py` |
 | `bedrock-integration.py` | `aws_runner.py` |
