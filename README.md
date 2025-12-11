@@ -33,7 +33,7 @@ flowchart TB
 
     subgraph AWS["AWS Cloud"]
         subgraph ECS["ECS Fargate (No Time Limit)"]
-            Entrypoint["aws_runner.py<br/>(Container Entrypoint)"]
+            Entrypoint["aws_runner.py<br/>(AgentCore SDK)"]
             SessionMgr["agent.py<br/>(Session Manager)"]
             Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
         end
