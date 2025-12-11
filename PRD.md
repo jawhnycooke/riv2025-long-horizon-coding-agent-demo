@@ -19,7 +19,7 @@ The architecture uses a single Claude agent with full capabilities, managed by a
 
 ```mermaid
 flowchart TB
-    SessionMgr["agent.py<br/>(Session Manager)"]
+    SessionMgr["claude_code_agent.py<br/>(Session Manager)"]
     Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
     Files["📁 State Files<br/>tests.json, claude-progress.txt"]
     Git["📦 Git<br/>Commits as checkpoints"]
@@ -34,7 +34,7 @@ flowchart TB
 | Component | Role |
 |-----------|------|
 | `aws_runner.py` | ECS container entrypoint using AgentCore SDK |
-| `agent.py` | Session manager (creates Claude SDK client, manages state) |
+| `claude_code_agent.py` | Session manager (creates Claude SDK client, manages state) |
 | Claude Agent | Implements features, runs tests, commits changes |
 
 **Why ECS Fargate instead of AgentCore managed runtime?** The AgentCore managed runtime has an 8-hour execution limit. Long-horizon coding sessions can run for many hours, so we deploy to ECS Fargate (no time limit) while still using the AgentCore SDK for the agent framework.
@@ -43,7 +43,7 @@ flowchart TB
 
 The original design included an Orchestrator + Worker pattern, but this added unnecessary complexity:
 
-1. **Session management is already handled by `agent.py`** - State machine, completion detection, GitHub integration
+1. **Session management is already handled by `claude_code_agent.py`** - State machine, completion detection, GitHub integration
 2. **No benefit to separating read/write** - The agent needs full tool access to implement features
 3. **Simpler is better** - Fewer moving parts means easier debugging and maintenance
 
@@ -75,7 +75,7 @@ The original design included an Orchestrator + Worker pattern, but this added un
 | **Progress Log** | `claude-progress.txt` for session continuity | `generated-app/claude-progress.txt` |
 | **Init Script** | `init.sh` for dev server startup | `generated-app/init.sh` |
 | **Git Recovery** | Post-commit hooks, auto-push | `src/git_manager.py` |
-| **Session Startup** | State machine reads progress | `agent.py` |
+| **Session Startup** | State machine reads progress | `claude_code_agent.py` |
 | **E2E Testing** | Playwright screenshot verification | `src/security.py` |
 
 ---

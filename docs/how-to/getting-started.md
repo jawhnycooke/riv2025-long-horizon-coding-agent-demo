@@ -46,7 +46,7 @@ See [Set Up AWS Bedrock Provider](./setup-bedrock-provider.md) for detailed Bedr
 #### 3. Run the Agent
 
 ```bash
-uv run python agent.py --project canopy
+uv run python claude_code_agent.py --project canopy
 ```
 
 The agent will create a `generated-app/` directory and build the project.
@@ -55,7 +55,7 @@ The agent will create a `generated-app/` directory and build the project.
 
 ```bash
 # Dry run to validate configuration
-uv run python agent.py --dry-run --project canopy
+uv run python claude_code_agent.py --dry-run --project canopy
 ```
 
 **You're done!** The agent runs locally using your configured provider.
@@ -167,10 +167,10 @@ Before triggering via GitHub, verify your setup:
 
 ```bash
 # Test provider configuration
-uv run python agent.py --dry-run --project canopy
+uv run python claude_code_agent.py --dry-run --project canopy
 
 # Run a quick local build
-uv run python agent.py --project canopy
+uv run python claude_code_agent.py --project canopy
 ```
 
 ### Step 5: Trigger via GitHub Issues
@@ -188,8 +188,8 @@ uv run python agent.py --project canopy
 |------|----------------|
 | Install dependencies | `uv pip install -r requirements.txt` |
 | Configure provider | `uv run python install.py` |
-| Run locally | `uv run python agent.py --project canopy` |
-| Dry run | `uv run python agent.py --dry-run --project canopy` |
+| Run locally | `uv run python claude_code_agent.py --project canopy` |
+| Dry run | `uv run python claude_code_agent.py --dry-run --project canopy` |
 | Deploy infrastructure | `cd infrastructure && cdk deploy` |
 | Trigger build | Add 🚀 to approved issue |
 

@@ -1,0 +1,38 @@
+# Orchestrator Container
+# Lightweight image for GitHub issue management and worker coordination
+#
+# Responsibilities:
+# - Poll GitHub for approved issues (rocket reaction)
+# - Claim issues by adding agent-building label
+# - Invoke Step Functions to start worker builds
+# - Monitor worker progress
+# - Post updates to GitHub issues
+# - Publish CloudWatch heartbeat metrics
+
+FROM public.ecr.aws/docker/library/python:3.12-slim
+
+# Install minimal system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy orchestrator code
+COPY orchestrator.py .
+COPY src/ ./src/
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+
+# Health check - verify Python can import the orchestrator
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import orchestrator; print('OK')" || exit 1
+
+# Run the orchestrator
+CMD ["python", "orchestrator.py"]

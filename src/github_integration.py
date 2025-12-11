@@ -458,3 +458,227 @@ Validate the feature by testing that:
             True if label exists
         """
         return any(label.name == label_name for label in issue.labels)
+
+
+# =============================================================================
+# Simple REST API helpers for Orchestrator
+# =============================================================================
+# These functions use requests directly for lightweight orchestrator operations.
+# Use GitHubIssueManager for more complex operations with PyGithub.
+
+
+def claim_issue_label(
+    github_repo: str,
+    github_token: str,
+    issue_number: int,
+    label: str = LABEL_BUILDING,
+) -> bool:
+    """Add a label to an issue (claim it for building).
+
+    Uses REST API directly for lightweight orchestrator operations.
+
+    Args:
+        github_repo: Full repo name (e.g., "owner/repo")
+        github_token: GitHub PAT
+        issue_number: Issue number
+        label: Label to add (default: agent-building)
+
+    Returns:
+        True if successful
+    """
+    import requests
+
+    try:
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        url = f"https://api.github.com/repos/{github_repo}/issues/{issue_number}/labels"
+        response = requests.post(
+            url, headers=headers, json={"labels": [label]}, timeout=30
+        )
+        response.raise_for_status()
+        print(f"✅ Added '{label}' label to issue #{issue_number}")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to add label to issue #{issue_number}: {e}")
+        return False
+
+
+def release_issue_label(
+    github_repo: str,
+    github_token: str,
+    issue_number: int,
+    label: str = LABEL_BUILDING,
+    add_complete_label: bool = True,
+) -> bool:
+    """Remove a label from an issue and optionally add complete label.
+
+    Uses REST API directly for lightweight orchestrator operations.
+
+    Args:
+        github_repo: Full repo name (e.g., "owner/repo")
+        github_token: GitHub PAT
+        issue_number: Issue number
+        label: Label to remove (default: agent-building)
+        add_complete_label: Whether to add agent-complete label
+
+    Returns:
+        True if successful
+    """
+    import requests
+
+    try:
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+
+        # Remove the label
+        url = f"https://api.github.com/repos/{github_repo}/issues/{issue_number}/labels/{label}"
+        response = requests.delete(url, headers=headers, timeout=30)
+        if response.status_code not in [200, 204, 404]:  # 404 = already removed
+            response.raise_for_status()
+        print(f"✅ Removed '{label}' label from issue #{issue_number}")
+
+        # Optionally add complete label
+        if add_complete_label:
+            add_url = f"https://api.github.com/repos/{github_repo}/issues/{issue_number}/labels"
+            requests.post(
+                add_url,
+                headers=headers,
+                json={"labels": [LABEL_COMPLETE]},
+                timeout=30,
+            )
+            print(f"✅ Added '{LABEL_COMPLETE}' label to issue #{issue_number}")
+
+        return True
+    except Exception as e:
+        print(f"❌ Failed to update labels on issue #{issue_number}: {e}")
+        return False
+
+
+def post_comment(
+    github_repo: str,
+    github_token: str,
+    issue_number: int,
+    body: str,
+) -> bool:
+    """Post a comment to an issue.
+
+    Args:
+        github_repo: Full repo name (e.g., "owner/repo")
+        github_token: GitHub PAT
+        issue_number: Issue number
+        body: Comment body (markdown)
+
+    Returns:
+        True if successful
+    """
+    import requests
+
+    try:
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        url = f"https://api.github.com/repos/{github_repo}/issues/{issue_number}/comments"
+        response = requests.post(url, headers=headers, json={"body": body}, timeout=30)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"❌ Failed to post comment to issue #{issue_number}: {e}")
+        return False
+
+
+def get_approved_issues_simple(
+    github_repo: str,
+    github_token: str,
+    authorized_approvers: set[str],
+    required_labels: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Get issues approved with 🚀 reaction.
+
+    Simplified version using REST API for orchestrator.
+
+    Args:
+        github_repo: Full repo name
+        github_token: GitHub PAT
+        authorized_approvers: Set of usernames who can approve
+        required_labels: Optional labels that issues must have
+
+    Returns:
+        List of approved issues sorted by votes
+    """
+    import requests
+
+    try:
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+
+        # Get open issues
+        url = f"https://api.github.com/repos/{github_repo}/issues"
+        params = {"state": "open", "per_page": 100}
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        issues = response.json()
+
+        approved = []
+        for issue in issues:
+            # Skip pull requests
+            if "pull_request" in issue:
+                continue
+
+            # Skip if already being built or complete
+            labels = [label["name"] for label in issue.get("labels", [])]
+            if LABEL_BUILDING in labels or LABEL_COMPLETE in labels:
+                continue
+
+            # Filter by required labels
+            if required_labels:
+                labels_lower = [l.lower() for l in labels]
+                if not all(rl.lower() in labels_lower for rl in required_labels):
+                    continue
+
+            # Check for 🚀 approval
+            reactions_url = issue.get("reactions", {}).get("url")
+            if not reactions_url:
+                continue
+
+            reactions_response = requests.get(
+                reactions_url, headers=headers, timeout=30
+            )
+            if reactions_response.status_code != 200:
+                continue
+
+            reactions = reactions_response.json()
+            has_approval = any(
+                r.get("content") in ["rocket", "hooray"]
+                and r.get("user", {}).get("login") in authorized_approvers
+                for r in reactions
+            )
+
+            if not has_approval:
+                continue
+
+            # Count thumbs up
+            thumbs_up = sum(1 for r in reactions if r.get("content") == "+1")
+
+            approved.append({
+                "number": issue["number"],
+                "title": issue["title"],
+                "body": issue.get("body", ""),
+                "labels": labels,
+                "votes": thumbs_up,
+                "created_at": issue["created_at"],
+            })
+
+        # Sort by votes desc, then created asc
+        approved.sort(key=lambda x: (-x["votes"], x["created_at"]))
+        return approved
+
+    except Exception as e:
+        print(f"❌ Failed to get approved issues: {e}")
+        return []

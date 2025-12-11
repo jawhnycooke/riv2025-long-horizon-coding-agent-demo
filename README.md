@@ -1,23 +1,6 @@
-# 🤖 Long-Horizon Coding Agent Demo
+# Long-Horizon Coding Agent
 
-An autonomous agent system that builds React applications from GitHub issues using AWS Bedrock AgentCore and the Claude Agent SDK. Demonstrated at AWS re:Invent 2025.
-
-> **📖 This project implements patterns from Anthropic's ["Effective Harnesses for Long-Running Agents"](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) article.**
-
-## About This Demo
-
-This project showcases **production patterns for long-horizon AI coding sessions** that can autonomously build complete React applications across multi-hour sessions.
-
-### Key Patterns Implemented
-
-| Pattern | Implementation | Documentation |
-|---------|---------------|---------------|
-| **Feature List (JSON)** | `tests.json` with pass/fail status | [feature-list.md](docs/patterns/feature-list.md) |
-| **Progress Log** | `claude-progress.txt` for session continuity | [progress-tracking.md](docs/patterns/progress-tracking.md) |
-| **Git Recovery** | Commits as checkpoints + state machine | [session-recovery.md](docs/patterns/session-recovery.md) |
-| **Screenshot Verification** | Playwright workflow with security hooks | [verification.md](docs/patterns/verification.md) |
-
-See [Pattern Documentation](docs/patterns/) for detailed explanations of each pattern.
+An autonomous agent system that builds React applications from GitHub issues using Claude Agent SDK on AWS ECS/Fargate.
 
 ## Architecture
 
@@ -26,330 +9,277 @@ See [Pattern Documentation](docs/patterns/) for detailed explanations of each pa
 ```mermaid
 flowchart TB
     subgraph GitHub["GitHub Repository"]
-        Issues["📋 Issues<br/>(Feature Requests)"]
+        Issues["📋 Issues"]
+        Labels["🏷️ Labels"]
+        Branch["🌿 agent-runtime branch"]
         Actions["⚡ GitHub Actions"]
-        Labels["🏷️ Labels<br/>(agent-building, agent-complete)"]
     end
 
     subgraph AWS["AWS Cloud"]
-        subgraph ECS["ECS Fargate (No Time Limit)"]
-            Entrypoint["aws_runner.py<br/>(AgentCore SDK)"]
-            SessionMgr["agent.py<br/>(Session Manager)"]
-            Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
+        subgraph ECS["ECS Fargate Cluster"]
+            Orch["🎯 Orchestrator<br/>orchestrator.py<br/>2GB / 1 vCPU"]
+            Worker["🔨 Worker<br/>claude_code_agent.py<br/>8GB / 4 vCPU"]
         end
 
-        EFS["EFS<br/>(Persistent Storage)"]
-        ECR["ECR<br/>(Container Registry)"]
-        CW["CloudWatch<br/>(Metrics & Logs)"]
-        SM["Secrets Manager<br/>(API Keys)"]
-        CF["CloudFront<br/>(Preview CDN)"]
-        S3["S3<br/>(Preview Assets)"]
+        SFN["Step Functions<br/>Worker State Machine"]
+        EFS["EFS<br/>Persistent Storage"]
+        S3["S3<br/>Screenshots & Previews"]
+        CF["CloudFront<br/>Preview CDN"]
+        CW["CloudWatch<br/>Metrics & Logs"]
+        SM["Secrets Manager<br/>API Keys"]
     end
 
-    subgraph LocalDev["Local Development"]
-        CLI["python agent.py"]
-        Config[".claude-code.json"]
+    subgraph External["External Services"]
+        Claude["Claude API<br/>Anthropic / Bedrock"]
     end
 
-    Issues -->|"🚀 Approved"| Actions
-    Actions -->|"Invoke"| ECS
-    ECS --> EFS
-    ECS --> ECR
-    Entrypoint -->|"spawns"| SessionMgr
-    SessionMgr -->|"creates"| Claude
-    SessionMgr -->|"Heartbeat"| CW
-    Entrypoint -->|"Fetch secrets"| SM
-    SessionMgr -->|"Update labels"| Labels
-    SessionMgr -->|"Post comments"| Issues
-    Actions -->|"Deploy"| S3
+    Issues -->|"🚀 Approved"| Orch
+    Orch -->|"Poll & Claim"| Labels
+    Orch -->|"Start Execution"| SFN
+    SFN -->|"ECS RunTask"| Worker
+    Worker -->|"Build & Test"| Claude
+    Worker -->|"Commit & Push"| Branch
+    Worker -->|"Upload"| S3
     S3 --> CF
-
-    CLI -->|"runs directly"| SessionMgr
-    Config --> CLI
+    Worker --> EFS
+    Orch --> CW
+    Worker --> CW
+    Orch --> SM
+    Worker --> SM
+    Actions -->|"Deploy"| S3
 ```
 
-### Issue-to-Deployment Workflow
+### Container Responsibilities
+
+```mermaid
+flowchart LR
+    subgraph Orchestrator["Orchestrator Container"]
+        O1["Poll GitHub for 🚀 issues"]
+        O2["Claim issue (add label)"]
+        O3["Invoke Step Functions"]
+        O4["Monitor worker status"]
+        O5["Post GitHub updates"]
+        O6["Publish heartbeat metrics"]
+        O1 --> O2 --> O3 --> O4 --> O5
+        O6
+    end
+
+    subgraph Worker["Worker Container"]
+        W1["Clone repository"]
+        W2["Create agent-runtime branch"]
+        W3["Load BUILD_PLAN.md"]
+        W4["Build React app"]
+        W5["Take Playwright screenshots"]
+        W6["Run tests"]
+        W7["Commit & push changes"]
+        W8["Exit with status code"]
+        W1 --> W2 --> W3 --> W4 --> W5 --> W6 --> W7 --> W8
+    end
+
+    Orchestrator -->|"Step Functions"| Worker
+```
+
+## Issue-to-Build Flow
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant GitHub as GitHub Issues
-    participant Poller as Issue Poller<br/>(every 5 min)
-    participant Builder as Agent Builder
-    participant AgentCore as Bedrock AgentCore
-    participant Agent as Claude Agent
-    participant Deploy as Deploy Preview
+    participant GitHub
+    participant Orchestrator
+    participant StepFunctions as Step Functions
+    participant Worker
+    participant Claude as Claude API
 
     User->>GitHub: Create issue with feature request
-    User->>GitHub: Vote with 👍
-    User->>GitHub: Approve with 🚀
+    User->>GitHub: Add 🚀 reaction (approve)
 
-    Poller->>GitHub: Check for approved issues
-    GitHub-->>Poller: Return approved issues (sorted by votes)
-    Poller->>Builder: Trigger build for top issue
-
-    Builder->>GitHub: Add "agent-building" label
-    Builder->>AgentCore: Invoke with issue number
-
-    AgentCore->>Agent: Start session
-
-    loop Build Loop
-        Agent->>Agent: Read BUILD_PLAN.md
-        Agent->>Agent: Implement feature
-        Agent->>Agent: Take screenshots
-        Agent->>Agent: Run tests
-        Agent->>GitHub: Push commits
-        Agent->>GitHub: Post progress comment
+    loop Every 5 minutes
+        Orchestrator->>GitHub: get_approved_issues()
     end
 
-    Agent->>GitHub: Signal completion 🎉
-    Agent->>GitHub: Remove "agent-building"
-    Agent->>GitHub: Add "agent-complete"
+    GitHub-->>Orchestrator: Issue #42 approved
+    Orchestrator->>GitHub: claim_issue(42) - add label
+    Orchestrator->>GitHub: post_comment("Build started")
+    Orchestrator->>StepFunctions: start_worker_build(42)
 
-    Deploy->>GitHub: Triggered by label
-    Deploy->>Deploy: Build & deploy to CloudFront
-    Deploy->>GitHub: Post preview URL
+    StepFunctions->>Worker: ECS RunTask(ISSUE_NUMBER=42)
+
+    Worker->>GitHub: Clone repository
+    Worker->>Worker: git checkout -b agent-runtime
+
+    loop Build Cycle
+        Worker->>Claude: Send context + tools
+        Claude-->>Worker: Tool calls (Edit, Bash, Read)
+        Worker->>Worker: Execute tools
+        Worker->>Worker: playwright screenshot
+        Worker->>Worker: Read screenshot (verify)
+        Worker->>GitHub: git commit && git push
+    end
+
+    Worker->>Worker: Final test validation
+    Worker-->>StepFunctions: Exit(0) success
+
+    StepFunctions-->>Orchestrator: Execution SUCCEEDED
+    Orchestrator->>GitHub: release_issue(42, mark_complete=True)
+    Orchestrator->>GitHub: post_comment("Build complete!")
 ```
 
-### Security Model
+## Worker Build Cycle
 
 ```mermaid
-flowchart LR
-    subgraph Agent["Claude Agent"]
-        SDK["Claude SDK"]
-        Tools["Tool Calls"]
-    end
+flowchart TD
+    Start([Start Worker]) --> Clone[Clone Repository]
+    Clone --> Branch[Create agent-runtime branch]
+    Branch --> LoadPlan[Load BUILD_PLAN.md]
+    LoadPlan --> InitTests[Initialize tests.json]
 
-    subgraph Hooks["Security Hooks (src/security.py)"]
-        PathHook["universal_path_security_hook<br/>━━━━━━━━━━━━━━━━━━━<br/>✓ Validate paths inside project<br/>✗ Block external file access"]
-        BashHook["bash_security_hook<br/>━━━━━━━━━━━━━━━━━━━<br/>✓ Allowlist: npm, git, node...<br/>✗ Block: rm -rf, curl, wget..."]
-        TestHook["track_read_hook<br/>━━━━━━━━━━━━━━━━━━━<br/>✓ Track screenshot reads<br/>✓ Verify before test pass"]
-    end
+    InitTests --> CheckTests{Tests remaining?}
+    CheckTests -->|Yes| GetTest[Get next test]
+    GetTest --> Implement[Implement feature]
+    Implement --> Screenshot[Take Playwright screenshot]
+    Screenshot --> Verify[Read screenshot to verify]
+    Verify --> TestPass{Test passes?}
+    TestPass -->|No| Implement
+    TestPass -->|Yes| MarkComplete[Mark test complete in tests.json]
+    MarkComplete --> Commit[git commit && push]
+    Commit --> CheckTests
 
-    subgraph Audit["Audit Trail"]
-        AuditLog["audit.log<br/>(JSON-parseable)"]
-    end
-
-    Tools -->|"File ops"| PathHook
-    Tools -->|"Bash cmds"| BashHook
-    Tools -->|"Read files"| TestHook
-
-    PathHook -->|"Log blocked"| AuditLog
-    BashHook -->|"Log blocked"| AuditLog
-    TestHook -->|"Log access"| AuditLog
-
-    PathHook -->|"✓ Allowed"| Execute["Execute Tool"]
-    BashHook -->|"✓ Allowed"| Execute
+    CheckTests -->|No| FinalValidation[Run final validation]
+    FinalValidation --> AllPass{All tests pass?}
+    AllPass -->|No| FixFailures[Fix failures]
+    FixFailures --> FinalValidation
+    AllPass -->|Yes| Success([Exit 0 - Success])
 ```
 
-### Session State Machine
+## Step Functions State Machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> continuous: Start agent
+    [*] --> Prepare: StartExecution
 
-    continuous --> continuous: Process issue
-    continuous --> run_once: Single task mode
-    continuous --> pause: Completion signal 🎉
-    continuous --> terminated: Error/timeout
+    Prepare: Prepare
+    Prepare: Extract input parameters
 
-    run_once --> continuous: More issues
-    run_once --> pause: No more issues
-    run_once --> terminated: Error
+    RunWorker: Run Worker
+    RunWorker: ECS RunTask
+    RunWorker: Wait for completion
 
-    pause --> continuous: Resume (new issue)
-    pause --> run_cleanup: Cleanup requested
-    pause --> terminated: Stop command
+    Success: Success
+    Success: Format result
 
-    run_cleanup --> pause: Cleanup done
-    run_cleanup --> terminated: Error
+    HandleError: Handle Error
+    HandleError: Capture error details
 
-    terminated --> [*]
-
-    note right of continuous
-        Active processing
-        - Building features
-        - Running tests
-        - Pushing commits
-    end note
-
-    note right of pause
-        Idle state
-        - Waiting for new issues
-        - Mission Control can resume
-    end note
-
-    note right of run_cleanup
-        Technical debt removal
-        - Refactoring
-        - Dead code cleanup
-    end note
+    Prepare --> RunWorker
+    RunWorker --> Success: Task succeeded
+    RunWorker --> HandleError: Task failed
+    Success --> [*]
+    HandleError --> [*]
 ```
 
-## How It Works
-
-### End-to-End Flow
-
-1. **User creates GitHub issue** with a feature request
-2. **Users vote** with 👍 reactions to prioritize what gets built
-3. **Authorized user approves** by adding a 🚀 reaction
-4. **Issue poller** (runs every 5 min) detects approved issues, sorted by votes
-5. **Agent builder** workflow acquires lock and invokes AWS Bedrock AgentCore
-6. **Bedrock entrypoint** clones the repo and starts the Claude agent
-7. **Agent builds the feature** following the build plan, taking screenshots, running tests
-8. **Progress is tracked** via commits pushed to the `agent-runtime` branch
-9. **Screenshots and updates are posted** to the GitHub issue
-10. **On completion**, the agent signals done, commits are pushed, and `agent-complete` label is added
-11. **If more issues exist**, the agent continues in enhancement mode
-12. **Deploy preview** workflow builds and deploys to CloudFront
-
-### Repository Setup (GitHub Mode)
-
-In GitHub mode, the agent clones your target repository and builds from scratch:
+## Security Model
 
 ```mermaid
-sequenceDiagram
-    participant Repo as Target Repo
-    participant Entry as aws_runner.py
-    participant Agent as agent.py
+flowchart LR
+    subgraph Agent["Claude Agent (Worker)"]
+        SDK["Claude Agent SDK"]
+        Tools["Tool Calls"]
+    end
 
-    Note over Repo: Requirements:<br/>✓ Git initialized<br/>✓ Main branch exists
+    subgraph Hooks["Security Hooks"]
+        PathHook["Path Validator<br/>───────────<br/>✓ Inside project<br/>✗ External paths"]
+        BashHook["Bash Allowlist<br/>───────────<br/>✓ npm, git, node<br/>✗ rm -rf, curl"]
+        TestHook["Screenshot Tracker<br/>───────────<br/>✓ Must view screenshot<br/>✓ Before marking pass"]
+    end
 
-    Entry->>Repo: Clone repository
-    Entry->>Entry: Create agent-runtime branch
-    Entry->>Entry: mkdir generated-app/ (empty)
-    Entry->>Entry: Install post-commit hook
-    Entry->>Agent: Start session
-    Agent->>Agent: Read BUILD_PLAN.md
-    Agent->>Agent: Build React app from scratch
-    Agent->>Repo: Auto-push commits
+    subgraph Audit["Audit Trail"]
+        Log["audit.log"]
+    end
+
+    Tools -->|"File ops"| PathHook
+    Tools -->|"Commands"| BashHook
+    Tools -->|"Read"| TestHook
+
+    PathHook --> Log
+    BashHook --> Log
+    TestHook --> Log
 ```
 
-**Key points:**
-- Target repo needs only git initialized with a main branch
-- `frontend-scaffold-template/` is **not used** in GitHub mode (only local mode)
-- Agent creates empty `generated-app/` and builds everything from the `BUILD_PLAN.md` spec
+## Component Reference
 
-See [GitHub Mode Setup](docs/how-to/github-mode-setup.md) for detailed requirements and troubleshooting.
-
-## Key Features
-
-- **Vote-based prioritization** - Issues with more 👍 reactions are built first
-- **Health monitoring** - CloudWatch heartbeat detects stale sessions and triggers auto-restart
-- **Incremental builds** - Agent builds new features on top of existing generated code
-- **Screenshot capture** - Playwright takes screenshots throughout development
-- **Live previews** - Each issue gets a CloudFront preview URL
+| Component | File | Description |
+|-----------|------|-------------|
+| **Orchestrator** | `orchestrator.py` | Long-running ECS service. Polls GitHub, claims issues, invokes workers via Step Functions |
+| **Worker** | `claude_code_agent.py` | On-demand ECS task. Builds features using Claude Agent SDK |
+| **ECS Stack** | `infrastructure/lib/ecs-cluster-stack.ts` | ECS cluster, task definitions, security groups |
+| **Step Functions** | `infrastructure/lib/step-functions-stack.ts` | Worker invocation state machine |
+| **Core Infra** | `infrastructure/lib/claude-code-stack.ts` | VPC, ECR, EFS, S3, CloudFront, Secrets |
 
 ## Quick Start
 
-### Prerequisites
-
-- AWS account with Bedrock AgentCore access
-- GitHub repository with Actions enabled
-- Python 3.11+ with `uv`
-
-### 1. Install Dependencies
+### Local Development
 
 ```bash
-uv pip install -r requirements.txt
+# Install dependencies
+pip install -r requirements.txt
+
+# Run worker directly
+python claude_code_agent.py --project canopy
+
+# Run with Docker Compose
+docker-compose up worker
 ```
 
-### 2. Configure Provider
-
-Run the interactive setup wizard:
+### Environment Variables
 
 ```bash
-uv run python install.py
+# Required
+ANTHROPIC_API_KEY=sk-ant-...
+GITHUB_TOKEN=ghp_...
+GITHUB_REPOSITORY=owner/repo
+
+# Optional
+PROVIDER=anthropic          # or "bedrock"
+ENVIRONMENT=local
+ISSUE_NUMBER=1              # for worker mode
 ```
 
-Select your provider (Anthropic or AWS Bedrock) and follow the prompts.
-
-### 3. Configure GitHub Repository
-
-Set up secrets, variables, and labels for GitHub Actions integration.
-
-See [Configure GitHub Repository](docs/how-to/configure-github-repository.md) for detailed instructions.
-
-### 4. Run Locally
+### Deploy to AWS
 
 ```bash
-uv run python agent.py --project canopy
+cd infrastructure
+npm install
+cdk deploy --all
 ```
-
-## Documentation
-
-### Pattern Documentation
-
-Learn how this project implements the patterns from Anthropic's article:
-
-| Document | Description |
-|----------|-------------|
-| [Pattern Overview](docs/patterns/README.md) | Introduction and architecture |
-| [Feature List Pattern](docs/patterns/feature-list.md) | How `tests.json` prevents cheating |
-| [Progress Tracking Pattern](docs/patterns/progress-tracking.md) | Session continuity with `claude-progress.txt` |
-| [Session Recovery Pattern](docs/patterns/session-recovery.md) | Git commits as recovery checkpoints |
-| [Verification Pattern](docs/patterns/verification.md) | Screenshot workflow with Playwright |
-
-### SDK Integration Examples
-
-Standalone examples demonstrating SDK usage:
-
-| Example | Description |
-|---------|-------------|
-| [basic-orchestrator.py](examples/basic-orchestrator.py) | Minimal orchestrator + worker pattern |
-| [with-sandbox.py](examples/with-sandbox.py) | SDK sandbox security settings |
-| [structured-outputs.py](examples/structured-outputs.py) | JSON schema validation |
-| [bedrock-integration.py](examples/bedrock-integration.py) | AWS Bedrock configuration |
-
-### How-To Guides
-
-Detailed setup guides in [`docs/how-to/`](docs/how-to/):
-
-| Guide | Description |
-|-------|-------------|
-| [Getting Started](docs/how-to/getting-started.md) | Setup paths for local development and production |
-| [Set Up AWS Bedrock Provider](docs/how-to/setup-bedrock-provider.md) | Configure the agent to use Amazon Bedrock |
-| [Configure GitHub Repository](docs/how-to/configure-github-repository.md) | Set up secrets, variables, labels, and AWS Secrets Manager |
-
-### Additional Resources
-
-- [Infrastructure Deployment (CDK)](infrastructure/README.md) - Deploy AWS infrastructure
 
 ## Project Structure
 
 ```
-├── aws_runner.py            # ECS Fargate entrypoint (uses AgentCore SDK)
-├── agent.py                 # Agent session manager and local runner
-├── src/                     # Python modules
-│   ├── agents/              # SDK agent client factory
-│   │   └── orchestrator.py  # create_agent_client() function
-│   ├── security.py          # Security hooks (path validation, command allowlist)
-│   ├── cloudwatch_metrics.py  # Heartbeat and metrics
-│   ├── github_integration.py  # GitHub API operations
-│   └── git_manager.py       # Git commit/push logic
-├── docs/
-│   ├── patterns/            # Pattern documentation (article mapping)
-│   │   ├── README.md        # Overview and architecture
-│   │   ├── feature-list.md  # tests.json pattern
-│   │   ├── progress-tracking.md  # claude-progress.txt pattern
-│   │   ├── session-recovery.md   # Git recovery pattern
-│   │   └── verification.md  # Screenshot workflow pattern
-│   └── how-to/              # Setup and configuration guides
-├── examples/                # SDK integration examples
-│   ├── basic-agent.py       # Minimal agent with security hooks
-│   ├── with-sandbox.py      # Sandbox security settings
-│   ├── structured-outputs.py  # JSON schema validation
-│   └── bedrock-integration.py  # AWS Bedrock configuration
-├── prompts/                 # Build plans and system prompts
-│   ├── system_prompt.txt    # Generic agent instructions
-│   └── canopy/              # Project Management app build plan
-├── frontend-scaffold-template/  # React + Vite + Tailwind scaffold
-└── .github/workflows/       # GitHub Actions
-    ├── issue-poller.yml     # Polls for approved issues
-    ├── agent-builder.yml    # Invokes AgentCore
-    └── deploy-preview.yml   # Deploys to CloudFront
+├── orchestrator.py              # Orchestrator container entrypoint
+├── claude_code_agent.py         # Worker container entrypoint
+├── src/
+│   ├── secrets.py               # AWS Secrets Manager utilities
+│   ├── github_integration.py    # GitHub API operations
+│   ├── security.py              # Security hooks
+│   ├── cloudwatch_metrics.py    # Heartbeat metrics
+│   └── git_manager.py           # Git operations
+├── infrastructure/
+│   ├── lib/
+│   │   ├── claude-code-stack.ts      # Core infrastructure
+│   │   ├── ecs-cluster-stack.ts      # ECS cluster + tasks
+│   │   └── step-functions-stack.ts   # Worker state machine
+│   └── bin/
+│       └── claude-code-infrastructure.ts
+├── prompts/
+│   └── canopy/BUILD_PLAN.md     # Project specification
+├── Dockerfile.orchestrator      # Orchestrator image
+├── Dockerfile.worker            # Worker image
+└── .github/workflows/
+    ├── agent-builder.yml        # Start worker via Step Functions
+    ├── stop-agent-on-close.yml  # Cleanup on issue close
+    └── deploy-preview.yml       # Deploy to CloudFront
 ```
 
 ## License
 
-MIT
+Apache 2.0

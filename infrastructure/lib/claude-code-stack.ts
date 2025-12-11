@@ -23,27 +23,35 @@ export interface ClaudeCodeStackProps extends cdk.StackProps {
 }
 
 /**
- * Simplified CDK Stack for AgentCore
+ * Core Infrastructure Stack for Two-Container ECS Architecture
  *
- * This stack provides supporting infrastructure for AWS Bedrock AgentCore.
- * AgentCore manages its own compute - we just provide:
- * - ECR repository (stores the agent container image)
- * - EFS file system (persistent storage)
+ * This stack provides core infrastructure shared across the architecture:
+ * - VPC (networking)
+ * - ECR repository (stores container images)
+ * - EFS file system (persistent storage for worker state)
  * - Secrets Manager (API keys)
- * - IAM roles (for GitHub Actions to invoke AgentCore)
- * - CloudWatch logs (observability)
+ * - S3 + CloudFront (screenshots and app previews)
+ * - CloudWatch dashboard (observability)
  * - Backup (EFS snapshots)
+ *
+ * Exports VPC, EFS, and ECR for use by ECS and Step Functions stacks.
  */
 export class ClaudeCodeStack extends cdk.Stack {
+  // Exported resources for dependent stacks
+  public readonly vpc: ec2.Vpc;
+  public readonly fileSystem: efs.FileSystem;
+  public readonly accessPoint: efs.AccessPoint;
+  public readonly repository: ecr.Repository;
+
   constructor(scope: Construct, id: string, props: ClaudeCodeStackProps) {
     super(scope, id, props);
 
     const { projectName, environment, logRetentionDays } = props;
 
     // ========================================================================
-    // VPC - Required for EFS
+    // VPC - Required for EFS and ECS
     // ========================================================================
-    const vpc = new ec2.Vpc(this, 'VPC', {
+    this.vpc = new ec2.Vpc(this, 'VPC', {
       maxAzs: 2,
       natGateways: 0,
       subnetConfiguration: [
@@ -56,9 +64,9 @@ export class ClaudeCodeStack extends cdk.Stack {
     });
 
     // ========================================================================
-    // ECR Repository - Stores agent container image (used by AgentCore)
+    // ECR Repository - Stores orchestrator and worker container images
     // ========================================================================
-    const repository = new ecr.Repository(this, 'Repository', {
+    this.repository = new ecr.Repository(this, 'Repository', {
       repositoryName: `${projectName}-${environment}`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       lifecycleRules: [
@@ -70,10 +78,10 @@ export class ClaudeCodeStack extends cdk.Stack {
     });
 
     // ========================================================================
-    // EFS File System - Persistent storage for agent state
+    // EFS File System - Persistent storage for worker state
     // ========================================================================
-    const fileSystem = new efs.FileSystem(this, 'FileSystem', {
-      vpc,
+    this.fileSystem = new efs.FileSystem(this, 'FileSystem', {
+      vpc: this.vpc,
       performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
       throughputMode: efs.ThroughputMode.BURSTING,
       encrypted: true,
@@ -81,8 +89,8 @@ export class ClaudeCodeStack extends cdk.Stack {
       enableAutomaticBackups: true,
     });
 
-    // Create access point for agent
-    const accessPoint = fileSystem.addAccessPoint('AgentAccessPoint', {
+    // Create access point for worker containers
+    this.accessPoint = this.fileSystem.addAccessPoint('AgentAccessPoint', {
       path: '/projects',
       createAcl: {
         ownerUid: '1000',
@@ -111,10 +119,11 @@ export class ClaudeCodeStack extends cdk.Stack {
     );
 
     // ========================================================================
-    // CloudWatch Log Group - For observability
+    // CloudWatch Log Group - For core infrastructure observability
+    // Note: ECS task logs are managed by EcsClusterStack
     // ========================================================================
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
-      logGroupName: `/agentcore/${projectName}-${environment}`,
+      logGroupName: `/claude-code/${projectName}-${environment}`,
       retention: logRetentionDays === 7
         ? logs.RetentionDays.ONE_WEEK
         : logs.RetentionDays.TWO_WEEKS,
@@ -143,20 +152,20 @@ export class ClaudeCodeStack extends cdk.Stack {
     });
 
     backupPlan.addSelection('EfsBackupSelection', {
-      resources: [backup.BackupResource.fromEfsFileSystem(fileSystem)],
+      resources: [backup.BackupResource.fromEfsFileSystem(this.fileSystem)],
     });
 
     // ========================================================================
-    // IAM Role for AgentCore Invocation (GitHub Actions)
+    // IAM Role for GitHub Actions (Orchestrator/Step Functions Invocation)
     // ========================================================================
-    const githubAgentCoreRole = new iam.Role(this, 'GitHubAgentCoreRole', {
-      roleName: `${projectName}-github-agentcore-invoker`,
-      description: 'Role for GitHub Actions to invoke Bedrock AgentCore',
+    const githubOrchestratorRole = new iam.Role(this, 'GitHubOrchestratorRole', {
+      roleName: `${projectName}-github-orchestrator-invoker`,
+      description: 'Role for GitHub Actions to invoke ECS orchestrator and monitor Step Functions',
       assumedBy: new iam.AccountPrincipal(cdk.Stack.of(this).account),
       maxSessionDuration: cdk.Duration.hours(8),
     });
 
-    githubAgentCoreRole.assumeRolePolicy?.addStatements(
+    githubOrchestratorRole.assumeRolePolicy?.addStatements(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         principals: [new iam.AccountPrincipal(cdk.Stack.of(this).account)],
@@ -164,23 +173,49 @@ export class ClaudeCodeStack extends cdk.Stack {
       })
     );
 
-    // Grant Bedrock AgentCore permissions
-    githubAgentCoreRole.addToPolicy(new iam.PolicyStatement({
+    // Grant ECS permissions to start/stop orchestrator tasks
+    githubOrchestratorRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
-        'bedrock:InvokeAgent',
-        'bedrock-agent-runtime:InvokeAgent',
-        'bedrock-agentcore:InvokeAgentRuntime',
-        'bedrock-agentcore:StopRuntimeSession',
+        'ecs:RunTask',
+        'ecs:StopTask',
+        'ecs:DescribeTasks',
+        'ecs:DescribeServices',
+        'ecs:UpdateService',
       ],
       resources: [
-        `arn:aws:bedrock-agentcore:${this.region}:${this.account}:runtime/antodo_agent-0UyfaL5NVq`,
-        '*',
+        `arn:aws:ecs:${this.region}:${this.account}:cluster/${projectName}-${environment}`,
+        `arn:aws:ecs:${this.region}:${this.account}:task/${projectName}-${environment}/*`,
+        `arn:aws:ecs:${this.region}:${this.account}:service/${projectName}-${environment}/*`,
+        `arn:aws:ecs:${this.region}:${this.account}:task-definition/${projectName}-${environment}-*`,
+      ],
+    }));
+
+    // Grant Step Functions permissions to monitor worker executions
+    githubOrchestratorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'states:DescribeExecution',
+        'states:ListExecutions',
+        'states:StopExecution',
+      ],
+      resources: [
+        `arn:aws:states:${this.region}:${this.account}:stateMachine:${projectName}-${environment}-worker`,
+        `arn:aws:states:${this.region}:${this.account}:execution:${projectName}-${environment}-worker:*`,
+      ],
+    }));
+
+    // Grant IAM PassRole for ECS task execution
+    githubOrchestratorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['iam:PassRole'],
+      resources: [
+        `arn:aws:iam::${this.account}:role/${projectName}-${environment}-*`,
       ],
     }));
 
     // Grant Secrets Manager read
-    githubAgentCoreRole.addToPolicy(new iam.PolicyStatement({
+    githubOrchestratorRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['secretsmanager:GetSecretValue'],
       resources: [
@@ -189,7 +224,7 @@ export class ClaudeCodeStack extends cdk.Stack {
     }));
 
     // Grant SSM Parameter Store read access (for health monitor to read current issue)
-    githubAgentCoreRole.addToPolicy(new iam.PolicyStatement({
+    githubOrchestratorRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['ssm:GetParameter'],
       resources: [
@@ -198,69 +233,14 @@ export class ClaudeCodeStack extends cdk.Stack {
     }));
 
     // Grant CloudWatch read access (for health monitor to check heartbeat metrics)
-    githubAgentCoreRole.addToPolicy(new iam.PolicyStatement({
+    githubOrchestratorRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['cloudwatch:GetMetricStatistics'],
       resources: ['*'],
     }));
 
-    // ========================================================================
-    // AgentCore Execution Role - Grant Secrets & CloudWatch Access
-    // ========================================================================
-    const agentCoreSecretsPolicy = new iam.ManagedPolicy(this, 'AgentCoreSecretsPolicy', {
-      // Let CDK auto-generate name to avoid replacement conflicts
-      description: 'Allows AgentCore execution role to read claude-code secrets and manage SSM parameters',
-      statements: [
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ['secretsmanager:GetSecretValue'],
-          resources: [
-            `arn:aws:secretsmanager:${this.region}:${this.account}:secret:claude-code/*`,
-          ],
-        }),
-        // SSM Parameter Store write/delete access for session health tracking
-        // AgentCore writes current issue number for health monitor to read
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ['ssm:PutParameter', 'ssm:DeleteParameter', 'ssm:GetParameter'],
-          resources: [
-            `arn:aws:ssm:${this.region}:${this.account}:parameter/claude-code/*`,
-          ],
-        }),
-      ],
-      roles: [
-        iam.Role.fromRoleName(
-          this,
-          'AgentCoreExecutionRole',
-          'AmazonBedrockAgentCoreSDKRuntime-us-west-2-f3ae55dcc2'
-        ),
-      ],
-    });
-
-    // CloudWatch metrics policy for AgentCore runtime
-    new iam.ManagedPolicy(this, 'AgentCoreCloudWatchPolicy', {
-      // Let CDK auto-generate name to avoid replacement conflicts
-      description: 'Allows AgentCore execution role to push CloudWatch metrics',
-      statements: [
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ['cloudwatch:PutMetricData'],
-          resources: ['*'],
-          conditions: {
-            StringEquals: {
-              'cloudwatch:namespace': 'ClaudeCodeAgent',
-            },
-          },
-        }),
-      ],
-      roles: [
-        iam.Role.fromRoleName(
-          this,
-          'AgentCoreExecutionRoleForCloudWatch',
-          'AmazonBedrockAgentCoreSDKRuntime-us-west-2-f3ae55dcc2'
-        ),
-      ],
-    });
+    // Note: ECS task roles for orchestrator and worker are defined in EcsClusterStack
+    // They are granted secrets, CloudWatch, and S3 permissions there.
 
     // ========================================================================
     // S3 Bucket + CloudFront - Screenshot storage for agent builds
@@ -282,14 +262,7 @@ export class ClaudeCodeStack extends cdk.Stack {
       comment: `${projectName} agent screenshots`,
     });
 
-    // Grant AgentCore execution role write access to S3
-    screenshotsBucket.grantWrite(
-      iam.Role.fromRoleName(
-        this,
-        'AgentCoreExecutionRoleForScreenshots',
-        'AmazonBedrockAgentCoreSDKRuntime-us-west-2-f3ae55dcc2'
-      )
-    );
+    // Note: S3 write permissions for worker containers are granted in EcsClusterStack
 
     // ========================================================================
     // S3 Bucket + CloudFront - App Preview hosting for agent builds
@@ -371,14 +344,7 @@ function handler(event) {
       comment: `${projectName} app previews`,
     });
 
-    // Grant AgentCore execution role write access to previews bucket (for future inline builds)
-    previewsBucket.grantWrite(
-      iam.Role.fromRoleName(
-        this,
-        'AgentCoreExecutionRoleForPreviews',
-        'AmazonBedrockAgentCoreSDKRuntime-us-west-2-f3ae55dcc2'
-      )
-    );
+    // Note: S3 write permissions for worker containers are granted in EcsClusterStack
 
     // IAM Role for GitHub Actions Preview Deployment
     const githubPreviewDeployRole = new iam.Role(this, 'GitHubPreviewDeployRole', {
@@ -443,9 +409,11 @@ function handler(event) {
     // ========================================================================
     // CloudWatch Dashboard - Agent Monitoring for re:Invent Demo
     // ========================================================================
-    // Note: AgentCore logs go to /aws/bedrock-agentcore/runtimes/{runtime-id}
-    // Specify the exact log group name (wildcards not supported in dashboard widgets)
-    const agentLogGroupName = '/aws/bedrock-agentcore/runtimes/antodo_agent-0UyfaL5NVq-DEFAULT';
+    // Note: Worker logs go to ECS log groups managed by EcsClusterStack
+    // Orchestrator: /ecs/{project}-{env}/orchestrator
+    // Worker: /ecs/{project}-{env}/worker
+    const workerLogGroupName = `/ecs/${projectName}-${environment}/worker`;
+    const orchestratorLogGroupName = `/ecs/${projectName}-${environment}/orchestrator`;
 
     // Dashboard variable for filtering by Issue Number
     // Use fromSearch with explicit search string that includes ALL dimensions
@@ -611,7 +579,7 @@ function handler(event) {
     dashboard.addWidgets(
       new cloudwatch.LogQueryWidget({
         title: 'Tool Usage Distribution',
-        logGroupNames: [agentLogGroupName],
+        logGroupNames: [workerLogGroupName, orchestratorLogGroupName],
         queryString: `
           fields @message
           | filter @message like /\\[Tool Call\\]/ and @message like /\\[issue:\${issueNumber}\\]/
@@ -626,7 +594,7 @@ function handler(event) {
       }),
       new cloudwatch.LogQueryWidget({
         title: 'Activity Timeline (events/min)',
-        logGroupNames: [agentLogGroupName],
+        logGroupNames: [workerLogGroupName, orchestratorLogGroupName],
         queryString: `
           fields @timestamp
           | filter @message like /\\[issue:\${issueNumber}\\]/ or @message like /"issue_number":\\s*\${issueNumber}[,}]/
@@ -644,7 +612,7 @@ function handler(event) {
     dashboard.addWidgets(
       new cloudwatch.LogQueryWidget({
         title: 'Recent Agent Activity',
-        logGroupNames: [agentLogGroupName],
+        logGroupNames: [workerLogGroupName, orchestratorLogGroupName],
         queryString: `
           fields @timestamp, @message
           | filter @message like /\\[issue:\${issueNumber}\\]/ or @message like /"issue_number":\\s*\${issueNumber}[,}]/
@@ -660,19 +628,19 @@ function handler(event) {
     // Outputs
     // ========================================================================
     new cdk.CfnOutput(this, 'EcrRepositoryUri', {
-      value: repository.repositoryUri,
+      value: this.repository.repositoryUri,
       description: 'ECR repository URI for pushing Docker images',
       exportName: `${projectName}-${environment}-ecr-uri`,
     });
 
     new cdk.CfnOutput(this, 'EfsFileSystemId', {
-      value: fileSystem.fileSystemId,
+      value: this.fileSystem.fileSystemId,
       description: 'EFS file system ID',
       exportName: `${projectName}-${environment}-efs-id`,
     });
 
     new cdk.CfnOutput(this, 'EfsAccessPointId', {
-      value: accessPoint.accessPointId,
+      value: this.accessPoint.accessPointId,
       description: 'EFS access point ID',
       exportName: `${projectName}-${environment}-efs-ap`,
     });
@@ -689,14 +657,14 @@ function handler(event) {
       exportName: `${projectName}-${environment}-api-key-arn`,
     });
 
-    new cdk.CfnOutput(this, 'GitHubAgentCoreRoleArn', {
-      value: githubAgentCoreRole.roleArn,
-      description: 'IAM role ARN for GitHub Actions AgentCore invocation',
-      exportName: `${projectName}-github-agentcore-role`,
+    new cdk.CfnOutput(this, 'GitHubOrchestratorRoleArn', {
+      value: githubOrchestratorRole.roleArn,
+      description: 'IAM role ARN for GitHub Actions orchestrator invocation',
+      exportName: `${projectName}-github-orchestrator-role`,
     });
 
     new cdk.CfnOutput(this, 'VpcId', {
-      value: vpc.vpcId,
+      value: this.vpc.vpcId,
       description: 'VPC ID',
       exportName: `${projectName}-${environment}-vpc-id`,
     });
@@ -744,7 +712,7 @@ function handler(event) {
     });
 
     // ========================================================================
-    // X-Ray Resource Policy - For AgentCore observability trace delivery
+    // X-Ray Resource Policy - For trace delivery (optional observability)
     // ========================================================================
     // CDK doesn't have native support for X-Ray resource policies, so we use
     // AwsCustomResource to call the X-Ray API directly.
@@ -754,7 +722,7 @@ function handler(event) {
         service: 'XRay',
         action: 'putResourcePolicy',
         parameters: {
-          PolicyName: 'BedrockAgentCoreTraceAccess',
+          PolicyName: 'ClaudeCodeAgentTraceAccess',
           PolicyDocument: JSON.stringify({
             Version: '2012-10-17',
             Statement: [{
@@ -782,7 +750,7 @@ function handler(event) {
         service: 'XRay',
         action: 'putResourcePolicy',
         parameters: {
-          PolicyName: 'BedrockAgentCoreTraceAccess',
+          PolicyName: 'ClaudeCodeAgentTraceAccess',
           PolicyDocument: JSON.stringify({
             Version: '2012-10-17',
             Statement: [{
@@ -810,7 +778,7 @@ function handler(event) {
         service: 'XRay',
         action: 'deleteResourcePolicy',
         parameters: {
-          PolicyName: 'BedrockAgentCoreTraceAccess',
+          PolicyName: 'ClaudeCodeAgentTraceAccess',
         },
       },
       policy: cr.AwsCustomResourcePolicy.fromStatements([

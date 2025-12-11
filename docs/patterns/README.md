@@ -24,7 +24,7 @@ This project implements the patterns from the article to build React application
 
 ```mermaid
 flowchart TB
-    SessionMgr["agent.py<br/>(Session Manager)"]
+    SessionMgr["claude_code_agent.py<br/>(Session Manager)"]
     Claude["🤖 Claude Agent<br/>(Claude Agent SDK)"]
     Files["📁 State Files<br/>tests.json, claude-progress.txt"]
     Git["📦 Git<br/>Commits as checkpoints"]
@@ -34,7 +34,7 @@ flowchart TB
     Claude -->|"commits"| Git
 ```
 
-**Session Manager** (`agent.py`): Manages session lifecycle, state machine, completion detection.
+**Session Manager** (`claude_code_agent.py`): Manages session lifecycle, state machine, completion detection.
 
 **Claude Agent**: Reads state files, implements features, runs tests, commits changes.
 

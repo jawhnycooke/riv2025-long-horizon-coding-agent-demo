@@ -1,6 +1,17 @@
+# Worker Container
+# Full build environment for executing GitHub issue builds
+#
+# Responsibilities:
+# - Clone repository and set up git branches
+# - Build React applications following BUILD_PLAN.md
+# - Take screenshots using Playwright
+# - Run tests and verify implementations
+# - Commit and push changes to git
+# - Exit with success/failure code
+
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
-# Install system dependencies for Playwright, git operations, and process management
+# Install system dependencies for Playwright, git operations, and React builds
 # Also includes Chromium dependencies for Playwright headless browser
 RUN apt-get update && apt-get install -y \
     git \
@@ -30,20 +41,14 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Playwright will use its own Chromium downloaded via `npx playwright install chromium`
-
 WORKDIR /app
 
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Bedrock AgentCore SDK
-RUN pip install --no-cache-dir bedrock-agentcore
-
-# Copy application code
-COPY agent.py .
-COPY aws_runner.py .
+# Copy worker application code
+COPY claude_code_agent.py .
 COPY src/ ./src/
 COPY prompts/ ./prompts/
 COPY frontend-scaffold-template/ ./frontend-scaffold-template/
@@ -56,12 +61,18 @@ RUN npm install -g @anthropic-ai/claude-code
 # Install Playwright for browser automation (screenshots, testing)
 RUN npx playwright install chromium
 
-# Create workspace directory (ephemeral in AgentCore)
-RUN mkdir -p /app/workspace
+# Create workspace directories
+RUN mkdir -p /app/workspace /projects
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
+ENV WORKER_MODE=true
 
-# Initialize workspace with required files at startup
-# Use opentelemetry-instrument to enable ADOT tracing for AgentCore observability
-CMD ["sh", "-c", "cp -r /app/prompts /app/workspace/ 2>/dev/null || true && cp -r /app/frontend-scaffold-template /app/workspace/ 2>/dev/null || true && opentelemetry-instrument python aws_runner.py"]
+# The worker is invoked with environment variables:
+# - ISSUE_NUMBER: GitHub issue number to build
+# - GITHUB_REPOSITORY: Target repo (e.g., "owner/repo")
+# - PROVIDER: "anthropic" or "bedrock"
+# - ENVIRONMENT: Environment name for secrets lookup
+
+# Run the worker in worker mode
+CMD ["python", "claude_code_agent.py", "--worker-mode"]

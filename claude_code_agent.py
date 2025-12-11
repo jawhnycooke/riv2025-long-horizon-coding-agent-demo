@@ -399,6 +399,160 @@ def update_agent_state(
     write_agent_state(generation_dir, current=current, note=note)
 
 
+def setup_worker_environment(args: argparse.Namespace) -> tuple[Path, str | None]:
+    """Set up the worker environment for the two-container ECS architecture.
+
+    This function handles:
+    1. Cloning the target repository
+    2. Creating/checking out the agent branch
+    3. Setting up the working directory
+
+    Args:
+        args: Parsed command line arguments with worker mode options
+
+    Returns:
+        Tuple of (work_dir, github_token) or raises SystemExit on failure
+    """
+    import subprocess
+
+    # Get issue number from CLI or environment
+    issue_number = args.issue or int(os.environ.get("ISSUE_NUMBER", "0"))
+    if not issue_number:
+        builtins.print("❌ Worker mode requires --issue or ISSUE_NUMBER environment variable")
+        raise SystemExit(1)
+
+    # Get GitHub repo from CLI or environment
+    github_repo = args.github_repo or os.environ.get("GITHUB_REPOSITORY", "")
+    if not github_repo:
+        builtins.print("❌ Worker mode requires --github-repo or GITHUB_REPOSITORY environment variable")
+        raise SystemExit(1)
+
+    builtins.print("=" * 60)
+    builtins.print("🔧 Worker Mode Setup")
+    builtins.print("=" * 60)
+    builtins.print(f"📋 Issue: #{issue_number}")
+    builtins.print(f"📦 Repository: {github_repo}")
+    builtins.print(f"🌿 Branch: {args.branch}")
+
+    # Get GitHub token
+    from src import get_github_token, write_github_token_to_file
+    github_token = get_github_token(github_repo)
+    if not github_token:
+        builtins.print("❌ Failed to get GitHub token from Secrets Manager")
+        raise SystemExit(1)
+
+    # Write token to file for git operations
+    write_github_token_to_file(github_token)
+
+    # Determine clone URL
+    clone_url = args.clone_url or f"https://x-access-token:{github_token}@github.com/{github_repo}.git"
+
+    # Set up working directory
+    work_dir = Path("/app/workspace") if Path("/app").exists() else Path.cwd() / "workspace"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    repo_dir = work_dir / github_repo.replace("/", "_")
+
+    # Clone or update repository
+    if repo_dir.exists():
+        builtins.print(f"📂 Repository already exists at {repo_dir}")
+        # Pull latest changes
+        try:
+            subprocess.run(
+                ["git", "fetch", "origin"],
+                cwd=repo_dir,
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+        except Exception as e:
+            builtins.print(f"⚠️ Failed to fetch: {e}")
+    else:
+        builtins.print(f"📥 Cloning repository to {repo_dir}...")
+        try:
+            subprocess.run(
+                ["git", "clone", clone_url, str(repo_dir)],
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+        except subprocess.CalledProcessError as e:
+            builtins.print(f"❌ Clone failed: {e.stderr.decode() if e.stderr else e}")
+            raise SystemExit(1)
+
+    # Create or checkout the agent branch
+    try:
+        # Check if branch exists
+        result = subprocess.run(
+            ["git", "branch", "-r", "--list", f"origin/{args.branch}"],
+            cwd=repo_dir,
+            capture_output=True,
+            timeout=30,
+        )
+        branch_exists = bool(result.stdout.strip())
+
+        if branch_exists:
+            builtins.print(f"🌿 Checking out existing branch: {args.branch}")
+            subprocess.run(
+                ["git", "checkout", args.branch],
+                cwd=repo_dir,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            subprocess.run(
+                ["git", "pull", "origin", args.branch],
+                cwd=repo_dir,
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+        else:
+            builtins.print(f"🌿 Creating new branch: {args.branch}")
+            subprocess.run(
+                ["git", "checkout", "-b", args.branch],
+                cwd=repo_dir,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+    except subprocess.CalledProcessError as e:
+        builtins.print(f"⚠️ Branch setup warning: {e.stderr.decode() if e.stderr else e}")
+
+    # Set up git config
+    try:
+        subprocess.run(
+            ["git", "config", "user.email", "agent@claude-code.ai"],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Claude Code Agent"],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception as e:
+        builtins.print(f"⚠️ Git config warning: {e}")
+
+    # Create generated-app directory
+    output_dir = repo_dir / "generated-app"
+    output_dir.mkdir(exist_ok=True)
+
+    builtins.print(f"✅ Worker environment ready")
+    builtins.print(f"   Work dir: {repo_dir}")
+    builtins.print(f"   Output dir: {output_dir}")
+    builtins.print("=" * 60)
+
+    # Update args with resolved values
+    args.output_dir = str(output_dir)
+    args.skip_git_init = True  # Git is already set up
+
+    return repo_dir, github_token
+
+
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -491,7 +645,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--bootstrap-files",
         action="store_true",
-        help="Copy reference implementation files (agent.py, src/) into project for agent to study",
+        help="Copy reference implementation files (claude_code_agent.py, src/) into project for agent to study",
     )
 
     parser.add_argument(
@@ -532,6 +686,45 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         help="Filter GitHub issues by labels (comma-separated). Only issues with ALL specified labels will be picked up.",
         metavar="LABELS",
+    )
+
+    # Worker mode arguments (for two-container ECS architecture)
+    parser.add_argument(
+        "--worker-mode",
+        action="store_true",
+        help="Run in worker mode (receives issue from Step Functions, handles git setup)",
+    )
+
+    parser.add_argument(
+        "--issue",
+        type=int,
+        default=None,
+        help="GitHub issue number to build (for worker mode). Can also use ISSUE_NUMBER env var.",
+        metavar="NUMBER",
+    )
+
+    parser.add_argument(
+        "--github-repo",
+        type=str,
+        default=None,
+        help="GitHub repository (owner/repo format). Can also use GITHUB_REPOSITORY env var.",
+        metavar="REPO",
+    )
+
+    parser.add_argument(
+        "--clone-url",
+        type=str,
+        default=None,
+        help="Git clone URL for the target repository (for worker mode).",
+        metavar="URL",
+    )
+
+    parser.add_argument(
+        "--branch",
+        type=str,
+        default="agent-runtime",
+        help="Git branch to use for commits (default: agent-runtime)",
+        metavar="BRANCH",
     )
 
     return parser.parse_args()
@@ -1999,6 +2192,14 @@ async def main() -> None:
         if not success:
             raise SystemExit(1)
         return
+
+    # Handle --worker-mode flag (two-container ECS architecture)
+    if args.worker_mode:
+        builtins.print("🔧 Running in Worker Mode")
+        work_dir, github_token = setup_worker_environment(args)
+        # Set PROJECT_ROOT to the cloned repo directory
+        os.environ["PROJECT_ROOT"] = str(work_dir)
+        PROJECT_ROOT = str(work_dir)
 
     # Load project configuration from .claude-code.json (if present)
     # CLI arguments take precedence over config file

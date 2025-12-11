@@ -21,7 +21,7 @@ sequenceDiagram
     participant Poller as Issue Poller
     participant Builder as Agent Builder
     participant Entry as aws_runner.py
-    participant Agent as agent.py
+    participant Agent as claude_code_agent.py
 
     Note over GH: Target repo requirements:<br/>✓ Git initialized<br/>✓ Main branch exists<br/>✗ No generated-app needed
 
@@ -125,7 +125,7 @@ your-repo/
 
 | Aspect | GitHub Mode | Local Mode |
 |--------|-------------|------------|
-| **Trigger** | GitHub issue with 🚀 approval | `python agent.py --project` |
+| **Trigger** | GitHub issue with 🚀 approval | `python claude_code_agent.py --project` |
 | **Template** | Not used - builds from scratch | `frontend-scaffold-template/` copied |
 | **Working directory** | `/app/workspace/agent-runtime/` | `./generated-app/` |
 | **Git setup** | Cloned from GitHub | `git init` (optional) |
@@ -164,7 +164,7 @@ When the agent builder workflow invokes AgentCore, `aws_runner.py` performs thes
    - Uses GitHub token for authentication
 
 6. **Start Agent Session**
-   - Passes control to `agent.py`
+   - Passes control to `claude_code_agent.py`
    - Agent reads `BUILD_PLAN.md` and begins building
 
 ## Troubleshooting
