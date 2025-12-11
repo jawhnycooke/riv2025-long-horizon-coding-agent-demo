@@ -77,8 +77,7 @@ EPCC_*.md
 epcc-*.json
 epcc-*.md
 
-# Claude Code local settings and instructions
-CLAUDE.md
+# Claude Code local settings
 .claude/
 
 # Technical requirements and planning (local)
