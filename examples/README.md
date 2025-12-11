@@ -87,8 +87,8 @@ These examples are simplified versions of the patterns used in the main project:
 | Example | Main Project Equivalent |
 |---------|------------------------|
 | `basic-agent.py` | `src/agents/orchestrator.py` |
-| `with-sandbox.py` | `src/sandbox.py` |
-| `structured-outputs.py` | `src/schemas/*.py` |
+| `with-sandbox.py` | `src/security.py` (security hooks) |
+| `structured-outputs.py` | Standalone example |
 | `bedrock-integration.py` | `aws_runner.py` |
 
 ## Further Reading

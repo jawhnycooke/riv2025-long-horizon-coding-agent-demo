@@ -48,7 +48,7 @@ from src.tracing import (
     get_tracing_manager,
     initialize_tracing,
 )
-from src.agents import create_orchestrator_client, create_legacy_client
+from src.agents import create_agent_client
 
 
 # Global state
@@ -1315,31 +1315,18 @@ def _create_claude_client(
     args: argparse.Namespace,
     system_prompt: str,
     generation_dir: Path,
-    use_orchestrator: bool = True,
 ) -> ClaudeSDKClient:
     """Create and configure the Claude SDK client.
-
-    This function delegates to the new orchestrator pattern from src/agents/.
-    The orchestrator pattern implements the two-agent architecture from
-    Anthropic's "Effective Harnesses for Long-Running Agents" article.
 
     Args:
         args: Command line arguments (must have .model attribute)
         system_prompt: System prompt for the agent
         generation_dir: Project directory path
-        use_orchestrator: If True, use Orchestrator+Worker pattern.
-                         If False, use legacy monolithic client.
 
     Returns:
         Configured ClaudeSDKClient
     """
-    if use_orchestrator:
-        # Use the new Orchestrator + Worker pattern
-        # This enables task delegation and structured agent architecture
-        return create_orchestrator_client(args, system_prompt, generation_dir)
-    else:
-        # Fall back to legacy monolithic client (for testing/comparison)
-        return create_legacy_client(args, system_prompt, generation_dir)
+    return create_agent_client(args, system_prompt, generation_dir)
 
 
 async def _run_cleanup_session(

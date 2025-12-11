@@ -158,22 +158,3 @@ def create_agent_client(
             add_dirs=[str(generation_dir / "prompts")],
         )
     )
-
-
-# Backward compatibility aliases
-def create_orchestrator_client(
-    args: Any,
-    system_prompt: str,
-    generation_dir: Path,
-) -> ClaudeSDKClient:
-    """Deprecated: Use create_agent_client instead."""
-    return create_agent_client(args, system_prompt, generation_dir)
-
-
-def create_legacy_client(
-    args: Any,
-    system_prompt: str,
-    generation_dir: Path,
-) -> ClaudeSDKClient:
-    """Deprecated: Use create_agent_client instead."""
-    return create_agent_client(args, system_prompt, generation_dir)

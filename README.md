@@ -314,26 +314,19 @@ Detailed setup guides in [`docs/how-to/`](docs/how-to/):
 ### Additional Resources
 
 - [Infrastructure Deployment (CDK)](infrastructure/README.md) - Deploy AWS infrastructure
-- [Orchestrator Prompt](prompts/orchestrator_prompt.txt) - System prompt for orchestrator agent
 
 ## Project Structure
 
 ```
-├── aws_runner.py            # Main orchestrator for AWS Bedrock AgentCore
+├── aws_runner.py            # ECS Fargate entrypoint (uses AgentCore SDK)
 ├── agent.py                 # Agent session manager and local runner
 ├── src/                     # Python modules
-│   ├── agents/              # SDK agent definitions
-│   │   ├── base.py          # BaseAgentDefinition class
-│   │   ├── worker.py        # Worker agent for atomic tasks
-│   │   └── orchestrator.py  # Orchestrator client creation
-│   ├── schemas/             # Structured output schemas
-│   │   ├── test_results.py  # Test verification schema
-│   │   ├── progress_report.py # Progress report schema
-│   │   └── build_artifacts.py # Build artifacts schema
-│   ├── sandbox.py           # SDK sandbox security settings
+│   ├── agents/              # SDK agent client factory
+│   │   └── orchestrator.py  # create_agent_client() function
+│   ├── security.py          # Security hooks (path validation, command allowlist)
 │   ├── cloudwatch_metrics.py  # Heartbeat and metrics
 │   ├── github_integration.py  # GitHub API operations
-│   └── git_operations.py      # Git commit/push logic
+│   └── git_manager.py       # Git commit/push logic
 ├── docs/
 │   ├── patterns/            # Pattern documentation (article mapping)
 │   │   ├── README.md        # Overview and architecture
@@ -343,13 +336,12 @@ Detailed setup guides in [`docs/how-to/`](docs/how-to/):
 │   │   └── verification.md  # Screenshot workflow pattern
 │   └── how-to/              # Setup and configuration guides
 ├── examples/                # SDK integration examples
-│   ├── basic-orchestrator.py  # Minimal two-agent pattern
+│   ├── basic-agent.py       # Minimal agent with security hooks
 │   ├── with-sandbox.py      # Sandbox security settings
 │   ├── structured-outputs.py  # JSON schema validation
 │   └── bedrock-integration.py  # AWS Bedrock configuration
 ├── prompts/                 # Build plans and system prompts
 │   ├── system_prompt.txt    # Generic agent instructions
-│   ├── orchestrator_prompt.txt  # Orchestrator-specific prompt
 │   └── canopy/              # Project Management app build plan
 ├── frontend-scaffold-template/  # React + Vite + Tailwind scaffold
 └── .github/workflows/       # GitHub Actions

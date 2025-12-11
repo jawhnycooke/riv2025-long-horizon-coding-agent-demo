@@ -1,7 +1,7 @@
 # Product Requirement Document: Claude Agent SDK Modernization
 
 **Created**: 2025-12-10
-**Version**: 3.0 (Simplified)
+**Version**: 4.0 (Simplified)
 **Status**: Complete
 **Complexity**: Low
 
@@ -47,42 +47,25 @@ The original design included an Orchestrator + Worker pattern, but this added un
 2. **No benefit to separating read/write** - The agent needs full tool access to implement features
 3. **Simpler is better** - Fewer moving parts means easier debugging and maintenance
 
-## Implemented Features
+## Implementation
 
-### ✅ F031: SDK Agent Architecture (Simplified)
+### SDK Agent Client
 - `src/agents/orchestrator.py` - `create_agent_client()` function
 - Single agent with full tool access
 - Security hooks for path validation and command restrictions
 
-### ✅ F032: SDK Sandbox Security (Foundation)
-- `src/sandbox.py` - `get_sandbox_settings()`
-- SandboxSettings configuration
-- Existing hooks preserved for validation
-
-### ✅ F033: Structured Output Schemas (Foundation)
-- `src/schemas/test_results.py` - TEST_RESULTS_SCHEMA
-- `src/schemas/progress_report.py` - PROGRESS_REPORT_SCHEMA
-- `src/schemas/build_artifacts.py` - BUILD_ARTIFACTS_SCHEMA
-
-### ✅ F034: Pattern Documentation
+### Pattern Documentation
 - `docs/patterns/README.md` - Overview mapping to article
 - `docs/patterns/feature-list.md` - tests.json pattern
 - `docs/patterns/progress-tracking.md` - claude-progress.txt pattern
 - `docs/patterns/session-recovery.md` - Git recovery pattern
 - `docs/patterns/verification.md` - Screenshot workflow pattern
 
-### ✅ F035: SDK Integration Examples
+### SDK Integration Examples
 - `examples/basic-agent.py` - Minimal agent with security hooks
 - `examples/with-sandbox.py` - SDK SandboxSettings usage
 - `examples/structured-outputs.py` - JSON schema validation
 - `examples/bedrock-integration.py` - AWS Bedrock configuration
-
-### ✅ F036: System Prompt
-- Uses existing `prompts/system_prompt.txt`
-
-### ✅ F037: README Demo Showcase
-- Architecture diagrams showing patterns
-- Pattern documentation links
 
 ## Article Pattern Mapping
 
@@ -97,4 +80,4 @@ The original design included an Orchestrator + Worker pattern, but this added un
 
 ---
 
-**End of PRD v3.0**
+**End of PRD v4.0**
