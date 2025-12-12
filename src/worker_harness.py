@@ -23,8 +23,13 @@ from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-from src.config import Provider, apply_provider_config
-from src.secrets import get_anthropic_api_key, get_github_token
+from src.config import Provider, apply_provider_env, get_model_id
+from src.secrets import (
+    BEDROCK_API_KEY_ENV_VAR,
+    get_anthropic_api_key,
+    get_bedrock_api_key,
+    get_github_token,
+)
 from src.security import SecurityValidator
 from src.worker_config import TestTask, WorkerConfig, WorkerStatus
 
@@ -49,6 +54,7 @@ class WorkerHarness:
         self.assigned_task: TestTask | None = None
         self.session_start_time: datetime | None = None
         self.github_token: str | None = None
+        self.all_tests_exhausted: bool = False  # Set by select_next_task
 
     # =========================================================================
     # BEFORE Agent
@@ -65,16 +71,16 @@ class WorkerHarness:
             True if setup successful, False otherwise
         """
         print("=" * 60)
-        print("🔧 Worker Harness - Environment Setup")
+        print("[WORKER] 🔧 Harness - Environment Setup")
         print("=" * 60)
-        print(f"📋 Issue: #{self.config.issue_number}")
-        print(f"📦 Repository: {self.config.github_repo}")
-        print(f"🌿 Branch: {self.config.branch}")
+        print(f"[WORKER] 📋 Issue: #{self.config.issue_number}")
+        print(f"[WORKER] 📦 Repository: {self.config.github_repo}")
+        print(f"[WORKER] 🌿 Branch: {self.config.branch}")
 
         # Get GitHub token
         self.github_token = get_github_token(self.config.github_repo)
         if not self.github_token:
-            print("❌ Failed to get GitHub token")
+            print("[WORKER] ❌ Failed to get GitHub token")
             return False
 
         # Ensure workspace exists
@@ -88,7 +94,7 @@ class WorkerHarness:
         if not self._checkout_branch():
             return False
 
-        print("✅ Environment setup complete")
+        print("[WORKER] ✅ Environment setup complete")
         return True
 
     def _clone_or_update_repo(self) -> bool:
@@ -97,7 +103,7 @@ class WorkerHarness:
         clone_url = f"https://x-access-token:{self.github_token}@github.com/{self.config.github_repo}.git"
 
         if repo_dir.exists():
-            print(f"📂 Repository exists at {repo_dir}")
+            print(f"[WORKER] 📂 Repository exists at {repo_dir}")
             try:
                 subprocess.run(
                     ["git", "fetch", "origin"],
@@ -108,10 +114,10 @@ class WorkerHarness:
                 )
                 return True
             except subprocess.CalledProcessError as e:
-                print(f"⚠️ Failed to fetch: {e}")
+                print(f"[WORKER] ⚠️ Failed to fetch: {e}")
                 return False
         else:
-            print(f"📥 Cloning repository to {repo_dir}...")
+            print(f"[WORKER] 📥 Cloning repository to {repo_dir}...")
             try:
                 subprocess.run(
                     ["git", "clone", clone_url, str(repo_dir)],
@@ -121,7 +127,7 @@ class WorkerHarness:
                 )
                 return True
             except subprocess.CalledProcessError as e:
-                print(f"❌ Clone failed: {e.stderr.decode() if e.stderr else e}")
+                print(f"[WORKER] ❌ Clone failed: {e.stderr.decode() if e.stderr else e}")
                 return False
 
     def _checkout_branch(self) -> bool:
@@ -140,7 +146,7 @@ class WorkerHarness:
             branch_exists = bool(result.stdout.strip())
 
             if branch_exists:
-                print(f"🌿 Checking out existing branch: {branch}")
+                print(f"[WORKER] 🌿 Checking out existing branch: {branch}")
                 subprocess.run(
                     ["git", "checkout", branch],
                     cwd=repo_dir,
@@ -156,7 +162,7 @@ class WorkerHarness:
                     timeout=60,
                 )
             else:
-                print(f"🌿 Creating new branch: {branch}")
+                print(f"[WORKER] 🌿 Creating new branch: {branch}")
                 subprocess.run(
                     ["git", "checkout", "-b", branch],
                     cwd=repo_dir,
@@ -167,7 +173,7 @@ class WorkerHarness:
 
             return True
         except subprocess.CalledProcessError as e:
-            print(f"❌ Branch operation failed: {e}")
+            print(f"[WORKER] ❌ Branch operation failed: {e}")
             return False
 
     def start_dev_servers(self) -> bool:
@@ -179,10 +185,10 @@ class WorkerHarness:
         init_script = self.config.init_script_path
 
         if not init_script.exists():
-            print("⚠️ No init.sh found - skipping server startup")
+            print("[WORKER] ⚠️ No init.sh found - skipping server startup")
             return True
 
-        print("🚀 Starting development servers...")
+        print("[WORKER] 🚀 Starting development servers...")
         try:
             # Run init.sh in background
             subprocess.Popen(
@@ -195,7 +201,7 @@ class WorkerHarness:
             # Wait for server to be ready
             return self._wait_for_server()
         except Exception as e:
-            print(f"❌ Failed to start servers: {e}")
+            print(f"[WORKER] ❌ Failed to start servers: {e}")
             return False
 
     def _wait_for_server(self, timeout: int = 60) -> bool:
@@ -205,7 +211,7 @@ class WorkerHarness:
         url = self.config.dev_server_address
         port = self.config.dev_server_port
 
-        print(f"⏳ Waiting for server at {url}...")
+        print(f"[WORKER] ⏳ Waiting for server at {url}...")
         start_time = time.time()
 
         while time.time() - start_time < timeout:
@@ -215,13 +221,13 @@ class WorkerHarness:
                 result = sock.connect_ex(("localhost", port))
                 sock.close()
                 if result == 0:
-                    print(f"✅ Server ready at {url}")
+                    print(f"[WORKER] ✅ Server ready at {url}")
                     return True
             except Exception:
                 pass
             time.sleep(1)
 
-        print(f"❌ Server not ready after {timeout}s")
+        print(f"[WORKER] ❌ Server not ready after {timeout}s")
         return False
 
     def run_smoke_test(self) -> bool:
@@ -230,7 +236,7 @@ class WorkerHarness:
         Returns:
             True if smoke test passes
         """
-        print("🧪 Running smoke test...")
+        print("[WORKER] 🧪 Running smoke test...")
 
         try:
             # Simple check: can we load the main page?
@@ -246,54 +252,73 @@ class WorkerHarness:
             )
 
             if result.returncode == 0:
-                print("✅ Smoke test passed")
+                print("[WORKER] ✅ Smoke test passed")
                 return True
             else:
-                print(f"❌ Smoke test failed: {result.stderr.decode()}")
+                print(f"[WORKER] ❌ Smoke test failed: {result.stderr.decode()}")
                 return False
         except subprocess.TimeoutExpired:
-            print("❌ Smoke test timed out")
+            print("[WORKER] ❌ Smoke test timed out")
             return False
         except Exception as e:
-            print(f"❌ Smoke test error: {e}")
+            print(f"[WORKER] ❌ Smoke test error: {e}")
             return False
 
     def select_next_task(self) -> TestTask | None:
         """Select the next failing test to work on.
 
         Returns:
-            TestTask if a failing test found, None if all pass
+            TestTask if a failing test found, None if all pass or all exhausted
+
+        Note:
+            Sets self.all_tests_exhausted = True if all failing tests have
+            reached max retries. Caller should check this flag to distinguish
+            between "all pass" and "all exhausted retries".
         """
         tests_path = self.config.tests_json_path
+        self.all_tests_exhausted = False  # Reset flag
 
         if not tests_path.exists():
-            print("⚠️ No tests.json found")
+            print("[WORKER] ⚠️ No tests.json found")
             return None
 
         try:
             with open(tests_path) as f:
                 tests_data = json.load(f)
 
-            # Find first failing test
+            # Track if we've seen any failing tests (even exhausted ones)
+            has_failing_tests = False
+            exhausted_count = 0
+
+            # Find first failing test that hasn't exhausted retries
             for test_data in tests_data:
                 if test_data.get("status") != "pass":
+                    has_failing_tests = True
                     task = TestTask.from_dict(test_data)
 
                     # Check retry limit
                     if task.retry_count >= self.config.max_retries_per_test:
-                        print(f"⏭️ Skipping {task.id} - max retries reached")
+                        print(f"[WORKER] ⏭️ Skipping {task.id} - max retries reached")
+                        exhausted_count += 1
                         continue
 
                     self.assigned_task = task
-                    print(f"📌 Selected task: {task.id}")
-                    print(f"   Description: {task.description}")
+                    print(f"[WORKER] 📌 Selected task: {task.id}")
+                    print(f"[WORKER]    Description: {task.description}")
                     return task
 
-            print("✅ All tests pass - nothing to do")
-            return None
+            # Distinguish between "all pass" and "all exhausted"
+            if has_failing_tests:
+                # All failing tests have exhausted their retries
+                self.all_tests_exhausted = True
+                print(f"[WORKER] ❌ All {exhausted_count} failing tests exhausted retries")
+                return None
+            else:
+                print("[WORKER] ✅ All tests pass - nothing to do")
+                return None
 
         except (json.JSONDecodeError, KeyError) as e:
-            print(f"❌ Error reading tests.json: {e}")
+            print(f"[WORKER] ❌ Error reading tests.json: {e}")
             return None
 
     # =========================================================================
@@ -424,22 +449,41 @@ Begin implementing {task.id} now.
         """
         project_root = str(self.config.repo_dir)
 
-        # Apply provider configuration
-        if self.config.provider == "bedrock":
-            os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
-            apply_provider_config(Provider.BEDROCK)
-        else:
-            apply_provider_config(Provider.ANTHROPIC)
+        # Determine provider enum
+        provider = Provider.BEDROCK if self.config.provider == "bedrock" else Provider.ANTHROPIC
 
-        # Get API key if using Anthropic
-        if self.config.provider == "anthropic":
+        # Apply provider configuration
+        apply_provider_env(provider)
+
+        # Get API key based on provider
+        if provider == Provider.ANTHROPIC:
             api_key = get_anthropic_api_key()
             if api_key:
                 os.environ["ANTHROPIC_API_KEY"] = api_key
+            elif not os.environ.get("ANTHROPIC_API_KEY"):
+                print("[WORKER] ⚠️ Warning: ANTHROPIC_API_KEY not set - API calls may fail")
+                print("[WORKER]    Set via environment variable or AWS Secrets Manager")
+        else:
+            # Bedrock provider - check for API key authentication
+            # See: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html
+            bedrock_api_key = get_bedrock_api_key()
+            if bedrock_api_key:
+                os.environ[BEDROCK_API_KEY_ENV_VAR] = bedrock_api_key
+                print("[WORKER] 🔑 Using Bedrock API key authentication")
+            elif os.environ.get(BEDROCK_API_KEY_ENV_VAR):
+                print("[WORKER] 🔑 Using Bedrock API key from environment")
+            else:
+                # No API key - will fall back to IAM credentials
+                print("[WORKER] 🔐 Using IAM credentials for Bedrock authentication")
+
+        # Get the correct model ID for the provider
+        model_id = get_model_id("sonnet", provider)
+        print(f"[WORKER] 🤖 Using model: {model_id} (provider: {provider.value})")
 
         # MCP servers - Playwright for browser automation
         mcp_servers = {
             "playwright": {
+                "type": "stdio",
                 "command": "npx",
                 "args": ["-y", "@anthropic/mcp-server-playwright"],
             },
@@ -465,7 +509,7 @@ Begin implementing {task.id} now.
 
         return ClaudeSDKClient(
             options=ClaudeAgentOptions(
-                model="claude-sonnet-4-20250514",
+                model=model_id,
                 system_prompt=system_prompt,
                 mcp_servers=mcp_servers,
                 allowed_tools=[
@@ -475,15 +519,16 @@ Begin implementing {task.id} now.
                 ],
                 hooks={
                     "PreToolUse": [
-                        HookMatcher(matcher="*", hooks=[path_hook]),
+                        HookMatcher(matcher="*", hooks=[path_hook], timeout=120),  # 2 min for path validation
                     ],
                     "PostToolUse": [
-                        HookMatcher(matcher="Bash", hooks=[bash_hook]),
-                        HookMatcher(matcher="Read", hooks=[read_hook]),
+                        HookMatcher(matcher="Bash", hooks=[bash_hook], timeout=90),  # 1.5 min for bash validation
+                        HookMatcher(matcher="Read", hooks=[read_hook], timeout=30),  # 30 sec for read tracking
                     ],
                 },
                 max_turns=1000,  # Per-task limit
                 cwd=project_root,
+                setting_sources=["project"],  # Load CLAUDE.md project instructions
             )
         )
 
@@ -508,13 +553,13 @@ Begin implementing {task.id} now.
             has_commit = bool(result.stdout.strip())
 
             if has_commit:
-                print(f"✅ Commit found: {result.stdout.decode().strip()}")
+                print(f"[WORKER] ✅ Commit found: {result.stdout.decode().strip()}")
             else:
-                print("⚠️ No commit made in this session")
+                print("[WORKER] ⚠️ No commit made in this session")
 
             return has_commit
         except Exception as e:
-            print(f"⚠️ Could not verify commit: {e}")
+            print(f"[WORKER] ⚠️ Could not verify commit: {e}")
             return False
 
     def check_test_status(self) -> str:
@@ -535,12 +580,12 @@ Begin implementing {task.id} now.
             for test in tests_data:
                 if test.get("id") == self.assigned_task.id:
                     status = test.get("status", "fail")
-                    print(f"📊 Test {self.assigned_task.id} status: {status}")
+                    print(f"[WORKER] 📊 Test {self.assigned_task.id} status: {status}")
                     return status
 
             return "unknown"
         except Exception as e:
-            print(f"⚠️ Could not check test status: {e}")
+            print(f"[WORKER] ⚠️ Could not check test status: {e}")
             return "unknown"
 
     def increment_retry_count(self) -> None:
@@ -563,7 +608,7 @@ Begin implementing {task.id} now.
                 json.dump(tests_data, f, indent=2)
 
         except Exception as e:
-            print(f"⚠️ Could not update retry count: {e}")
+            print(f"[WORKER] ⚠️ Could not update retry count: {e}")
 
     def determine_exit_status(self) -> WorkerStatus:
         """Determine the worker exit status based on test results.
@@ -581,10 +626,10 @@ Begin implementing {task.id} now.
             self.increment_retry_count()
 
             if self.assigned_task and self.assigned_task.retry_count >= self.config.max_retries_per_test:
-                print(f"❌ Test {self.assigned_task.id} failed after {self.config.max_retries_per_test} attempts")
+                print(f"[WORKER] ❌ Test {self.assigned_task.id} failed after {self.config.max_retries_per_test} attempts")
                 return WorkerStatus.FAILED
 
-            print(f"🔄 Test not yet passing - will retry")
+            print("[WORKER] 🔄 Test not yet passing - will retry")
             return WorkerStatus.CONTINUE
 
         # Test passed - check if all tests pass
@@ -597,14 +642,14 @@ Begin implementing {task.id} now.
             all_pass = all(t.get("status") == "pass" for t in tests_data)
 
             if all_pass:
-                print("🎉 ALL TESTS PASS - IMPLEMENTATION COMPLETE")
+                print("[WORKER] 🎉 ALL TESTS PASS - IMPLEMENTATION COMPLETE")
                 return WorkerStatus.COMPLETE
             else:
-                print("✅ Test passed - more tests remain")
+                print("[WORKER] ✅ Test passed - more tests remain")
                 return WorkerStatus.CONTINUE
 
         except Exception as e:
-            print(f"⚠️ Could not check all tests: {e}")
+            print(f"[WORKER] ⚠️ Could not check all tests: {e}")
             return WorkerStatus.CONTINUE
 
     def push_changes(self) -> bool:
@@ -621,8 +666,8 @@ Begin implementing {task.id} now.
                 capture_output=True,
                 timeout=60,
             )
-            print(f"✅ Pushed to origin/{self.config.branch}")
+            print(f"[WORKER] ✅ Pushed to origin/{self.config.branch}")
             return True
         except subprocess.CalledProcessError as e:
-            print(f"❌ Push failed: {e}")
+            print(f"[WORKER] ❌ Push failed: {e}")
             return False

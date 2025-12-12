@@ -435,17 +435,26 @@ class SecurityValidator:
             input_data: Tool input data
             tool_use_id: Tool use ID (optional)
             context: Hook context (optional)
+            project_root: Project root directory (optional)
 
         Returns:
             Hook response dict
         """
-        tool_input = input_data.get("tool_input", {})
-        tool_name = input_data.get("tool_name", "")
+        # Validate input structure
+        if not input_data or not isinstance(input_data, dict):
+            return {}
 
+        tool_name = input_data.get("tool_name")
         if tool_name != "Bash":
             return {}
 
+        tool_input = input_data.get("tool_input")
+        if not tool_input or not isinstance(tool_input, dict):
+            return {}
+
         command = tool_input.get("command", "")
+        if not command or not isinstance(command, str):
+            return {}
 
         # Get first word of command
         first_word = command.strip().split()[0] if command.strip() else ""
@@ -530,8 +539,17 @@ class SecurityValidator:
         Returns:
             Hook response dict
         """
-        tool_input = input_data.get("tool_input", {})
-        tool_name = input_data.get("tool_name", "")
+        # Validate input structure
+        if not input_data or not isinstance(input_data, dict):
+            return {}
+
+        tool_name = input_data.get("tool_name")
+        if not tool_name or not isinstance(tool_name, str):
+            return {}
+
+        tool_input = input_data.get("tool_input")
+        if not isinstance(tool_input, dict):
+            tool_input = {}
 
         # Handle Bash commands (includes both command restriction and path validation)
         if tool_name == "Bash":
@@ -904,10 +922,20 @@ class SecurityValidator:
         Returns:
             Empty dict (just tracks state, no output)
         """
-        tool_name = input_data.get("tool_name", "")
+        # Validate input structure
+        if not input_data or not isinstance(input_data, dict):
+            return {}
 
-        if tool_name == "Read":
-            file_path = input_data.get("tool_input", {}).get("file_path", "")
+        tool_name = input_data.get("tool_name")
+        if tool_name != "Read":
+            return {}
+
+        tool_input = input_data.get("tool_input")
+        if not tool_input or not isinstance(tool_input, dict):
+            return {}
+
+        file_path = tool_input.get("file_path", "")
+        if file_path and isinstance(file_path, str):
             # F025: Pass project_root for persistence
             track_screenshot_read(file_path, project_root)
 

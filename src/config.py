@@ -16,7 +16,7 @@ class Provider(str, Enum):
 
 
 # Model defaults
-DEFAULT_MODEL = "claude-opus-4-5-20251101"
+DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 DEFAULT_PROVIDER = Provider.ANTHROPIC
 
 # Bedrock region defaults
@@ -29,13 +29,56 @@ SUPPORTED_BEDROCK_REGIONS = [
     "ap-southeast-2",
 ]
 
-# Model ID mappings - Anthropic model IDs are used as canonical IDs
-# Bedrock uses the same IDs but requires CLAUDE_CODE_USE_BEDROCK=1 env var
-MODEL_DISPLAY_NAMES = {
-    "claude-opus-4-5-20251101": "Claude Opus 4.5",
-    "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
-    "claude-haiku-4-5-20250927": "Claude Haiku 4.5",
+# Model ID mappings for Anthropic (direct API)
+ANTHROPIC_MODEL_IDS = {
+    "opus": "claude-opus-4-5-20251101",
+    "sonnet": "claude-sonnet-4-5-20250929",
+    "haiku": "claude-haiku-4-5-20250927",
 }
+
+# Model ID mappings for Amazon Bedrock (cross-region inference)
+BEDROCK_MODEL_IDS = {
+    "opus": "global.anthropic.claude-opus-4-5-20251101-v1:0",
+    "sonnet": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+}
+
+# Display names for UI/logging
+MODEL_DISPLAY_NAMES = {
+    "opus": "Claude Opus 4.5",
+    "sonnet": "Claude Sonnet 4.5",
+    "haiku": "Claude Haiku 4.5",
+}
+
+
+def get_model_id(model_name: str, provider: Provider) -> str:
+    """Get the appropriate model ID for the given provider.
+
+    Args:
+        model_name: Short model name ("opus", "sonnet", "haiku") or full model ID
+        provider: Provider to get model ID for
+
+    Returns:
+        Full model ID string for the specified provider
+    """
+    # Normalize model name to short form
+    model_key = model_name.lower()
+
+    # Handle full model IDs passed in - extract the short name
+    if "opus" in model_key:
+        model_key = "opus"
+    elif "sonnet" in model_key:
+        model_key = "sonnet"
+    elif "haiku" in model_key:
+        model_key = "haiku"
+    else:
+        # Default to sonnet if unrecognized
+        model_key = "sonnet"
+
+    if provider == Provider.BEDROCK:
+        return BEDROCK_MODEL_IDS.get(model_key, BEDROCK_MODEL_IDS["sonnet"])
+    else:
+        return ANTHROPIC_MODEL_IDS.get(model_key, ANTHROPIC_MODEL_IDS["sonnet"])
 
 
 @dataclass
@@ -318,6 +361,29 @@ def apply_provider_config(config: ProjectConfig) -> None:
     env_vars = get_provider_env_vars(config)
     for key, value in env_vars.items():
         os.environ[key] = value
+
+
+def apply_provider_env(provider: Provider) -> None:
+    """
+    Apply minimal provider environment variables.
+
+    This is a simplified version of apply_provider_config that only sets
+    the CLAUDE_CODE_USE_BEDROCK environment variable based on the provider.
+    Use this when you don't have a full ProjectConfig object.
+
+    Args:
+        provider: The provider to configure (ANTHROPIC or BEDROCK)
+
+    Examples:
+        >>> apply_provider_env(Provider.BEDROCK)
+        # Sets CLAUDE_CODE_USE_BEDROCK=1
+        >>> apply_provider_env(Provider.ANTHROPIC)
+        # Sets CLAUDE_CODE_USE_BEDROCK=0
+    """
+    if provider == Provider.BEDROCK:
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+    else:
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "0"
 
 
 # Port defaults

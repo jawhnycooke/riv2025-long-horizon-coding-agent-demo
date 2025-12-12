@@ -33,6 +33,14 @@ Environment Variables (optional):
 import sys
 from pathlib import Path
 
+from claude_agent_sdk import (
+    ClaudeSDKError,
+    CLIConnectionError,
+    CLIJSONDecodeError,
+    CLINotFoundError,
+    ProcessError,
+)
+
 from src.cloudwatch_metrics import MetricsPublisher
 from src.worker_config import WorkerConfig, WorkerStatus
 from src.worker_harness import WorkerHarness
@@ -99,7 +107,7 @@ def main() -> int:
             3 - Smoke test failed (BROKEN_STATE)
     """
     print("=" * 60)
-    print("Worker - Harness-Enforced Architecture")
+    print("[WORKER] 🔨 Harness-Enforced Architecture")
     print("=" * 60)
 
     # Initialize metrics publisher for heartbeats
@@ -109,7 +117,7 @@ def main() -> int:
     try:
         config = WorkerConfig.from_environment()
     except ValueError as e:
-        print(f"Configuration error: {e}")
+        print(f"[WORKER] ❌ Configuration error: {e}")
         return WorkerStatus.FAILED.value
 
     # Create the harness
@@ -122,10 +130,10 @@ def main() -> int:
     # BEFORE Agent: Environment Setup
     # ==========================================================================
 
-    print("\n--- Phase 1: Environment Setup ---")
+    print("\n[WORKER] --- Phase 1: Environment Setup ---")
 
     if not harness.setup_environment():
-        print("Environment setup failed")
+        print("[WORKER] ❌ Environment setup failed")
         return WorkerStatus.FAILED.value
 
     # Publish heartbeat after setup
@@ -135,10 +143,10 @@ def main() -> int:
     # BEFORE Agent: Start Dev Servers
     # ==========================================================================
 
-    print("\n--- Phase 2: Start Dev Servers ---")
+    print("\n[WORKER] --- Phase 2: Start Dev Servers ---")
 
     if not harness.start_dev_servers():
-        print("Dev server startup failed")
+        print("[WORKER] ❌ Dev server startup failed")
         return WorkerStatus.FAILED.value
 
     # Publish heartbeat after servers start
@@ -148,30 +156,34 @@ def main() -> int:
     # BEFORE Agent: Smoke Test
     # ==========================================================================
 
-    print("\n--- Phase 3: Smoke Test ---")
+    print("\n[WORKER] --- Phase 3: Smoke Test ---")
 
     if not harness.run_smoke_test():
-        print("Smoke test failed - application is in broken state")
+        print("[WORKER] ❌ Smoke test failed - application is in broken state")
         return WorkerStatus.BROKEN_STATE.value
 
     # ==========================================================================
     # BEFORE Agent: Task Selection
     # ==========================================================================
 
-    print("\n--- Phase 4: Task Selection ---")
+    print("\n[WORKER] --- Phase 4: Task Selection ---")
 
     task = harness.select_next_task()
     if not task:
-        print("All tests pass - nothing to do!")
+        # Check if all tests actually pass or if all failing tests exhausted retries
+        if harness.all_tests_exhausted:
+            print("[WORKER] ❌ All failing tests exhausted retries - marking as FAILED")
+            return WorkerStatus.FAILED.value
+        print("[WORKER] ✅ All tests pass - nothing to do!")
         return WorkerStatus.COMPLETE.value
 
     # ==========================================================================
     # DURING Agent: Run Agent Session
     # ==========================================================================
 
-    print("\n--- Phase 5: Agent Session ---")
-    print(f"Assigned task: {task.id}")
-    print(f"Description: {task.description}")
+    print("\n[WORKER] --- Phase 5: Agent Session ---")
+    print(f"[WORKER] 📌 Assigned task: {task.id}")
+    print(f"[WORKER] 📝 Description: {task.description}")
 
     # Build the focused prompt
     prompt = harness.build_agent_prompt(task)
@@ -184,13 +196,29 @@ def main() -> int:
 
     # Run the agent
     try:
-        print("\nStarting Claude agent...")
+        print("\n[WORKER] 🚀 Starting Claude agent...")
         result = client.process(prompt)
-        print(f"\nAgent session completed: {result}")
+        print(f"\n[WORKER] 📋 Agent session completed: {result}")
+    except CLINotFoundError:
+        print("\n[WORKER] ❌ Claude Code CLI not found")
+        print("[WORKER]    Install: npm install -g @anthropic-ai/claude-code")
+        return WorkerStatus.FAILED.value
+    except CLIConnectionError as e:
+        print(f"\n[WORKER] ❌ Failed to connect to Claude Code: {e}")
+        return WorkerStatus.FAILED.value
+    except ProcessError as e:
+        print(f"\n[WORKER] ❌ Claude Code process failed (exit code {e.exit_code}): {e}")
+        return WorkerStatus.FAILED.value
+    except CLIJSONDecodeError as e:
+        print(f"\n[WORKER] ❌ Failed to parse response from Claude Code: {e}")
+        return WorkerStatus.FAILED.value
     except KeyboardInterrupt:
-        print("\nAgent interrupted by user")
+        print("\n[WORKER] ⚠️ Agent interrupted by user")
+    except ClaudeSDKError as e:
+        print(f"\n[WORKER] ❌ SDK error: {e}")
+        return WorkerStatus.FAILED.value
     except Exception as e:
-        print(f"\nAgent error: {e}")
+        print(f"\n[WORKER] ❌ Unexpected agent error: {e}")
         import traceback
         traceback.print_exc()
 
@@ -201,7 +229,7 @@ def main() -> int:
     # AFTER Agent: Validate Results
     # ==========================================================================
 
-    print("\n--- Phase 6: Validation ---")
+    print("\n[WORKER] --- Phase 6: Validation ---")
 
     # Check if a commit was made
     commit_made = harness.verify_commit_made()
@@ -218,7 +246,7 @@ def main() -> int:
     # ==========================================================================
 
     print("\n" + "=" * 60)
-    print(f"Worker Exit Status: {status.name} ({status.value})")
+    print(f"[WORKER] Exit Status: {status.name} ({status.value})")
     print("=" * 60)
 
     return status.value

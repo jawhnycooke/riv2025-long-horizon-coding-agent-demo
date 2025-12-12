@@ -36,11 +36,24 @@ import os
 import time
 from datetime import UTC, datetime
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, tool
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    ClaudeSDKError,
+    CLIConnectionError,
+    CLIJSONDecodeError,
+    CLINotFoundError,
+    ProcessError,
+    tool,
+)
 
 from src.cloudwatch_metrics import MetricsPublisher
-from src.config import Provider, apply_provider_config
-from src.secrets import get_anthropic_api_key
+from src.config import Provider, apply_provider_env, get_model_id
+from src.secrets import (
+    BEDROCK_API_KEY_ENV_VAR,
+    get_anthropic_api_key,
+    get_bedrock_api_key,
+)
 
 # =============================================================================
 # Configuration
@@ -62,6 +75,7 @@ AUTHORIZED_APPROVERS = [a.strip() for a in _approvers_env.split(",") if a.strip(
 
 MCP_SERVERS = {
     "github": {
+        "type": "stdio",
         "command": "npx",
         "args": [
             "-y",
@@ -72,6 +86,7 @@ MCP_SERVERS = {
         },
     },
     "aws": {
+        "type": "stdio",
         "command": "npx",
         "args": [
             "-y",
@@ -346,22 +361,40 @@ Begin now.
 def create_orchestrator_client() -> ClaudeSDKClient:
     """Create the Claude Agent SDK client with MCP servers."""
 
-    # Apply provider configuration
-    if PROVIDER == "bedrock":
-        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        apply_provider_config(Provider.BEDROCK)
-    else:
-        apply_provider_config(Provider.ANTHROPIC)
+    # Determine provider enum
+    provider = Provider.BEDROCK if PROVIDER == "bedrock" else Provider.ANTHROPIC
 
-    # Get API key if using Anthropic
-    if PROVIDER == "anthropic":
+    # Apply provider configuration
+    apply_provider_env(provider)
+
+    # Get API key based on provider
+    if provider == Provider.ANTHROPIC:
         api_key = get_anthropic_api_key()
         if api_key:
             os.environ["ANTHROPIC_API_KEY"] = api_key
+        elif not os.environ.get("ANTHROPIC_API_KEY"):
+            print("[ORCHESTRATOR] ⚠️ Warning: ANTHROPIC_API_KEY not set - API calls may fail")
+            print("[ORCHESTRATOR]    Set via environment variable or AWS Secrets Manager")
+    else:
+        # Bedrock provider - check for API key authentication
+        # See: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html
+        bedrock_api_key = get_bedrock_api_key()
+        if bedrock_api_key:
+            os.environ[BEDROCK_API_KEY_ENV_VAR] = bedrock_api_key
+            print("[ORCHESTRATOR] 🔑 Using Bedrock API key authentication")
+        elif os.environ.get(BEDROCK_API_KEY_ENV_VAR):
+            print("[ORCHESTRATOR] 🔑 Using Bedrock API key from environment")
+        else:
+            # No API key - will fall back to IAM credentials
+            print("[ORCHESTRATOR] 🔐 Using IAM credentials for Bedrock authentication")
+
+    # Get the correct model ID for the provider
+    model_id = get_model_id("sonnet", provider)
+    print(f"[ORCHESTRATOR] 🤖 Using model: {model_id} (provider: {provider.value})")
 
     return ClaudeSDKClient(
         options=ClaudeAgentOptions(
-            model="claude-sonnet-4-20250514",
+            model=model_id,
             system_prompt=SYSTEM_PROMPT,
             # MCP servers provide GitHub and AWS tools
             mcp_servers=MCP_SERVERS,
@@ -373,6 +406,7 @@ def create_orchestrator_client() -> ClaudeSDKClient:
                 "wait_seconds",        # Built-in
             ],
             max_turns=10000,  # Long-running orchestrator
+            setting_sources=["project"],  # Load CLAUDE.md project instructions
         )
     )
 
@@ -380,14 +414,14 @@ def create_orchestrator_client() -> ClaudeSDKClient:
 def main():
     """Main entry point for the orchestrator."""
     print("=" * 60)
-    print("🎯 Orchestrator - Intelligent Coordinator with MCP")
+    print("[ORCHESTRATOR] 🎯 Intelligent Coordinator with MCP")
     print("=" * 60)
-    print(f"📦 Repository: {GITHUB_REPO}")
-    print(f"🔧 Provider: {PROVIDER}")
-    print(f"⏱️  Poll interval: {POLL_INTERVAL}s")
-    print(f"👥 Authorized approvers: {AUTHORIZED_APPROVERS}")
-    print(f"🔌 MCP Servers: GitHub, AWS")
-    print(f"🌍 AWS Region: {AWS_REGION}")
+    print(f"[ORCHESTRATOR] 📦 Repository: {GITHUB_REPO}")
+    print(f"[ORCHESTRATOR] 🔧 Provider: {PROVIDER}")
+    print(f"[ORCHESTRATOR] ⏱️  Poll interval: {POLL_INTERVAL}s")
+    print(f"[ORCHESTRATOR] 👥 Authorized approvers: {AUTHORIZED_APPROVERS}")
+    print(f"[ORCHESTRATOR] 🔌 MCP Servers: GitHub, AWS")
+    print(f"[ORCHESTRATOR] 🌍 AWS Region: {AWS_REGION}")
     print("=" * 60)
 
     # Validate configuration
@@ -403,22 +437,38 @@ def main():
 
     if errors:
         for err in errors:
-            print(f"❌ {err}")
+            print(f"[ORCHESTRATOR] ❌ {err}")
         return 1
 
     # Create client and start
-    print("\n🚀 Starting orchestrator agent...")
+    print("\n[ORCHESTRATOR] 🚀 Starting orchestrator agent...")
     client = create_orchestrator_client()
 
     try:
         result = client.process(INITIAL_PROMPT)
-        print(f"\n📋 Orchestrator finished: {result}")
+        print(f"\n[ORCHESTRATOR] 📋 Finished: {result}")
         return 0
+    except CLINotFoundError:
+        print("\n[ORCHESTRATOR] ❌ Claude Code CLI not found")
+        print("[ORCHESTRATOR]    Install: npm install -g @anthropic-ai/claude-code")
+        return 2
+    except CLIConnectionError as e:
+        print(f"\n[ORCHESTRATOR] ❌ Failed to connect to Claude Code: {e}")
+        return 2
+    except ProcessError as e:
+        print(f"\n[ORCHESTRATOR] ❌ Claude Code process failed (exit code {e.exit_code}): {e}")
+        return 2
+    except CLIJSONDecodeError as e:
+        print(f"\n[ORCHESTRATOR] ❌ Failed to parse response from Claude Code: {e}")
+        return 2
     except KeyboardInterrupt:
-        print("\n⚠️ Orchestrator interrupted by user")
+        print("\n[ORCHESTRATOR] ⚠️ Interrupted by user")
         return 0
+    except ClaudeSDKError as e:
+        print(f"\n[ORCHESTRATOR] ❌ SDK error: {e}")
+        return 1
     except Exception as e:
-        print(f"\n❌ Orchestrator error: {e}")
+        print(f"\n[ORCHESTRATOR] ❌ Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         return 1

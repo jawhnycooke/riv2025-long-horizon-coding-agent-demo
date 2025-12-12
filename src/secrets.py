@@ -1,7 +1,7 @@
 """AWS Secrets Manager utilities for Claude Code Agent.
 
 Provides functions to fetch secrets from AWS Secrets Manager,
-including Anthropic API keys and GitHub tokens.
+including Anthropic API keys, Bedrock API keys, and GitHub tokens.
 """
 
 import os
@@ -11,6 +11,10 @@ from .config import get_boto3_client
 
 # File paths for git hook communication
 GITHUB_TOKEN_FILE = Path("/tmp/github_token.txt")
+
+# Environment variable for Bedrock API key authentication
+# See: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html
+BEDROCK_API_KEY_ENV_VAR = "AWS_BEARER_TOKEN_BEDROCK"
 
 
 def get_secret(secret_name: str, profile: str | None = None) -> str | None:
@@ -43,6 +47,25 @@ def get_anthropic_api_key(environment: str | None = None) -> str | None:
     """
     env = environment or os.environ.get("ENVIRONMENT", "reinvent")
     return get_secret(f"claude-code/{env}/anthropic-api-key")
+
+
+def get_bedrock_api_key(environment: str | None = None) -> str | None:
+    """Fetch Bedrock API key from Secrets Manager.
+
+    Bedrock API keys provide a simpler authentication method compared to
+    IAM credentials. The key should be set in the AWS_BEARER_TOKEN_BEDROCK
+    environment variable for SDK usage.
+
+    See: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html
+
+    Args:
+        environment: Environment name (optional, defaults to ENVIRONMENT env var)
+
+    Returns:
+        API key or None if not found
+    """
+    env = environment or os.environ.get("ENVIRONMENT", "reinvent")
+    return get_secret(f"claude-code/{env}/bedrock-api-key")
 
 
 def get_github_token(github_repo: str | None = None, environment: str | None = None) -> str | None:
