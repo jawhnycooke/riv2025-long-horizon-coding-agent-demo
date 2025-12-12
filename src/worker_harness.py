@@ -54,6 +54,7 @@ class WorkerHarness:
         self.assigned_task: TestTask | None = None
         self.session_start_time: datetime | None = None
         self.github_token: str | None = None
+        self.all_tests_exhausted: bool = False
 
     # =========================================================================
     # BEFORE Agent
@@ -375,9 +376,15 @@ Write the file to: {self.config.feature_list_path}
         """Select the next failing test to work on.
 
         Returns:
-            TestTask if a failing test found, None if all pass
+            TestTask if a failing test found, None if all pass or all exhausted
+
+        Note:
+            Sets self.all_tests_exhausted = True if there are failing tests but
+            all have reached max retries. This allows the caller to distinguish
+            between "all pass" and "all exhausted" states.
         """
         feature_list_path = self.config.feature_list_path
+        self.all_tests_exhausted = False  # Reset flag
 
         if not feature_list_path.exists():
             print("[WORKER] ⚠️ No feature_list.json found")
@@ -387,14 +394,20 @@ Write the file to: {self.config.feature_list_path}
             with open(feature_list_path) as f:
                 tests_data = json.load(f)
 
+            # Track if we found any failing tests (even if exhausted)
+            found_failing_tests = False
+            exhausted_count = 0
+
             # Find first failing test (passes: false)
             for test_data in tests_data:
                 if not test_data.get("passes", False):
+                    found_failing_tests = True
                     task = TestTask.from_dict(test_data)
 
                     # Check retry limit
                     if task.retry_count >= self.config.max_retries_per_test:
                         print(f"[WORKER] ⏭️ Skipping {task.id} - max retries reached")
+                        exhausted_count += 1
                         continue
 
                     self.assigned_task = task
@@ -402,8 +415,16 @@ Write the file to: {self.config.feature_list_path}
                     print(f"[WORKER]    Description: {task.description}")
                     return task
 
-            print("[WORKER] ✅ All tests pass - nothing to do")
-            return None
+            # Distinguish between "all pass" and "all failing tests exhausted"
+            if found_failing_tests:
+                # All failing tests have exhausted retries
+                self.all_tests_exhausted = True
+                print(f"[WORKER] ⚠️ All {exhausted_count} failing tests have exhausted retries")
+                return None
+            else:
+                # All tests actually pass
+                print("[WORKER] ✅ All tests pass - nothing to do")
+                return None
 
         except (json.JSONDecodeError, KeyError) as e:
             print(f"[WORKER] ❌ Error reading feature_list.json: {e}")

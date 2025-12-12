@@ -102,23 +102,23 @@ class TestCommandErrorMessages:
         assert "git commit" in msg
 
 
-class TestTestsJsonErrorMessages:
-    """Tests for tests.json modification error messages."""
+class TestFeatureListErrorMessages:
+    """Tests for feature_list.json modification error messages."""
 
-    def test_sed_tests_json_blocked(self) -> None:
-        """Test sed command on tests.json error."""
-        msg = SecurityErrorMessages.sed_tests_json_blocked(
-            "sed -i 's/false/true/g' tests.json"
+    def test_sed_feature_list_blocked(self) -> None:
+        """Test sed command on feature_list.json error."""
+        msg = SecurityErrorMessages.sed_feature_list_blocked(
+            "sed -i 's/false/true/g' feature_list.json"
         )
         assert "🚫 COMMAND BLOCKED" in msg
         assert "sed" in msg
-        assert "tests.json" in msg
+        assert "feature_list.json" in msg
         assert "screenshot" in msg.lower()
 
-    def test_bash_tests_json_blocked(self) -> None:
-        """Test bash command on tests.json error."""
-        msg = SecurityErrorMessages.bash_tests_json_blocked(
-            "jq '.tests[].passes = true' tests.json"
+    def test_bash_feature_list_blocked(self) -> None:
+        """Test bash command on feature_list.json error."""
+        msg = SecurityErrorMessages.bash_feature_list_blocked(
+            "jq '.features[].passes = true' feature_list.json"
         )
         assert "🚫 COMMAND BLOCKED" in msg
         assert "bash" in msg.lower() or "jq" in msg.lower()
@@ -137,7 +137,7 @@ class TestTestVerificationErrorMessages:
         assert "No screenshot found" in msg
         assert "login-flow" in msg
         assert "issue-42" in msg
-        assert "npx playwright screenshot" in msg or "playwright-test.cjs" in msg
+        assert "mcp__playwright__screenshot" in msg or "mcp__playwright__navigate" in msg
 
     def test_screenshot_not_viewed_message(self) -> None:
         """Test error when screenshot exists but wasn't viewed."""
@@ -150,22 +150,24 @@ class TestTestVerificationErrorMessages:
         assert "screenshots/issue-42/login-flow-12345.png" in msg
 
     def test_no_console_log_message(self) -> None:
-        """Test error when no console log exists."""
+        """Test info message when no console log exists (optional with MCP)."""
         msg = SecurityErrorMessages.test_no_console_log(
             "login-flow", "42", "screenshots/issue-42/login-flow-console.txt"
         )
-        assert "🚫 TEST BLOCKED" in msg
-        assert "No console log" in msg
-        assert "playwright-test.cjs" in msg
+        # Console logs are now optional with MCP - shows info, not blocked
+        assert "ℹ️" in msg or "No console log" in msg
+        assert "login-flow" in msg
+        assert "MCP" in msg or "optional" in msg.lower()
 
     def test_console_not_viewed_message(self) -> None:
-        """Test error when console log exists but wasn't viewed."""
+        """Test warning when console log exists but wasn't viewed (optional with MCP)."""
         msg = SecurityErrorMessages.test_console_not_viewed(
             "login-flow", "screenshots/issue-42/login-flow-console.txt"
         )
-        assert "🚫 TEST BLOCKED" in msg
-        assert "Console log not verified" in msg
-        assert "NO_CONSOLE_ERRORS" in msg
+        # Console logs are now optional with MCP - shows warning, not blocked
+        assert "⚠️" in msg or "wasn't viewed" in msg
+        assert "login-flow" in msg
+        assert "MCP" in msg or "console" in msg.lower()
 
     def test_no_id_found_message(self) -> None:
         """Test error when test ID cannot be determined."""
@@ -179,8 +181,8 @@ class TestMessageFormatConsistency:
     """Tests to ensure all messages follow consistent format."""
 
     @pytest.fixture
-    def all_error_messages(self) -> list[str]:
-        """Get all error messages for consistency testing."""
+    def blocking_error_messages(self) -> list[str]:
+        """Get all blocking error messages (🚫) for consistency testing."""
         return [
             SecurityErrorMessages.path_outside_project("/a", "/b"),
             SecurityErrorMessages.no_project_root(),
@@ -190,21 +192,40 @@ class TestMessageFormatConsistency:
             SecurityErrorMessages.node_not_allowed("node bad.js"),
             SecurityErrorMessages.pkill_not_allowed("pkill x", ["pkill -f npm"]),
             SecurityErrorMessages.git_init_blocked(),
-            SecurityErrorMessages.sed_tests_json_blocked("sed x"),
-            SecurityErrorMessages.bash_tests_json_blocked("jq x"),
+            SecurityErrorMessages.sed_feature_list_blocked("sed x"),
+            SecurityErrorMessages.bash_feature_list_blocked("jq x"),
             SecurityErrorMessages.test_no_screenshot("test", "1", "pattern"),
             SecurityErrorMessages.test_screenshot_not_viewed("test", "path"),
-            SecurityErrorMessages.test_no_console_log("test", "1", "pattern"),
-            SecurityErrorMessages.test_console_not_viewed("test", "path"),
             SecurityErrorMessages.test_no_id_found(),
         ]
 
-    def test_all_messages_start_with_emoji(self, all_error_messages: list[str]) -> None:
-        """All messages should start with 🚫."""
-        for msg in all_error_messages:
-            assert msg.startswith("🚫"), f"Message doesn't start with emoji: {msg[:50]}"
+    @pytest.fixture
+    def info_warning_messages(self) -> list[str]:
+        """Get info/warning messages (ℹ️/⚠️) - console logs are optional with MCP."""
+        return [
+            SecurityErrorMessages.test_no_console_log("test", "1", "pattern"),
+            SecurityErrorMessages.test_console_not_viewed("test", "path"),
+        ]
 
-    def test_all_messages_have_how_to_fix(self, all_error_messages: list[str]) -> None:
-        """All messages should include fix suggestions."""
-        for msg in all_error_messages:
+    def test_blocking_messages_start_with_block_emoji(
+        self, blocking_error_messages: list[str]
+    ) -> None:
+        """Blocking messages should start with 🚫."""
+        for msg in blocking_error_messages:
+            assert msg.startswith("🚫"), f"Message doesn't start with 🚫: {msg[:50]}"
+
+    def test_blocking_messages_have_how_to_fix(
+        self, blocking_error_messages: list[str]
+    ) -> None:
+        """Blocking messages should include fix suggestions."""
+        for msg in blocking_error_messages:
             assert "How to fix" in msg, f"Message missing fix suggestions: {msg[:50]}"
+
+    def test_info_warning_messages_have_appropriate_emoji(
+        self, info_warning_messages: list[str]
+    ) -> None:
+        """Info/warning messages should start with ℹ️ or ⚠️."""
+        for msg in info_warning_messages:
+            assert msg.startswith("ℹ️") or msg.startswith("⚠️"), (
+                f"Message doesn't start with info/warning emoji: {msg[:50]}"
+            )

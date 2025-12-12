@@ -712,10 +712,10 @@ class SecurityValidator:
         """
         for pattern in BLOCKED_SED_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
-                error_msg = SecurityErrorMessages.sed_tests_json_blocked(command)
+                error_msg = SecurityErrorMessages.sed_feature_list_blocked(command)
                 print(f"🚨 BLOCKED: {command}")
                 get_audit_logger().log_bash_command(
-                    command, blocked=True, reason="sed bulk-modify tests.json blocked"
+                    command, blocked=True, reason="sed bulk-modify feature_list.json blocked"
                 )
                 return _deny_response(error_msg)
         # sed command is allowed (doesn't match blocked patterns)
@@ -782,10 +782,10 @@ class SecurityValidator:
         """
         for pattern in BLOCKED_FEATURE_LIST_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
-                error_msg = SecurityErrorMessages.bash_tests_json_blocked(command)
+                error_msg = SecurityErrorMessages.bash_feature_list_blocked(command)
                 print(f"🚨 BLOCKED: {command}")
                 get_audit_logger().log_bash_command(
-                    command, blocked=True, reason="bash modify tests.json blocked"
+                    command, blocked=True, reason="bash modify feature_list.json blocked"
                 )
                 return _deny_response(error_msg)
         return {}

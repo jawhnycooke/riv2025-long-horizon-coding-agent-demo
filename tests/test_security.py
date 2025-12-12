@@ -214,10 +214,10 @@ class TestBashSecurityHook:
 
     @pytest.mark.asyncio
     async def test_sed_bulk_test_modification_blocked(self) -> None:
-        """Block sed commands that modify tests.json passes field."""
+        """Block sed commands that modify feature_list.json passes field."""
         input_data = {
             "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/false/true/g' tests.json"},
+            "tool_input": {"command": "sed -i 's/false/true/g' feature_list.json"},
         }
         result = await SecurityValidator.bash_security_hook(input_data)
         assert result["hookSpecificOutput"]["permissionDecision"] == "deny"

@@ -211,8 +211,8 @@ class SecurityErrorMessages:
         )
 
     @staticmethod
-    def sed_tests_json_blocked(command: str) -> str:
-        """Generate error message for blocked sed on tests.json.
+    def sed_feature_list_blocked(command: str) -> str:
+        """Generate error message for blocked sed on feature_list.json.
 
         Args:
             command: The sed command that was blocked
@@ -221,25 +221,25 @@ class SecurityErrorMessages:
             Formatted error message
         """
         return (
-            f"🚫 COMMAND BLOCKED: sed cannot modify tests.json\n\n"
+            f"🚫 COMMAND BLOCKED: sed cannot modify feature_list.json\n\n"
             f"Command: {command}\n\n"
-            f"Bulk modification of test results is not allowed.\n"
-            f"Each test must be verified individually before marking as passed.\n\n"
+            f"Bulk modification of feature results is not allowed.\n"
+            f"Each feature must be verified individually before marking as passed.\n\n"
             f"💡 How to fix:\n"
             f"  1. Navigate to the page: mcp__playwright__navigate(url: 'http://localhost:6174')\n"
-            f"  2. Take a screenshot: mcp__playwright__screenshot(path: 'screenshots/issue-X/<test-id>-<timestamp>.png')\n"
+            f"  2. Take a screenshot: mcp__playwright__screenshot(path: 'screenshots/issue-X/<feature-id>-<timestamp>.png')\n"
             f"  3. Check MCP output for console errors\n"
             f"  4. View screenshot using Read tool\n"
-            f"  5. Use the Edit tool to update that specific test's 'passes' field\n\n"
+            f"  5. Use the Edit tool to update that specific feature's 'passes' field\n\n"
             f"💡 Why this is required:\n"
-            f"  • Prevents falsely marking tests as passing\n"
-            f"  • Ensures each test is actually verified\n"
+            f"  • Prevents falsely marking features as passing\n"
+            f"  • Ensures each feature is actually verified\n"
             f"  • Creates audit trail with screenshot evidence"
         )
 
     @staticmethod
-    def bash_tests_json_blocked(command: str) -> str:
-        """Generate error message for blocked bash command on tests.json.
+    def bash_feature_list_blocked(command: str) -> str:
+        """Generate error message for blocked bash command on feature_list.json.
 
         Args:
             command: The bash command that was blocked
@@ -248,19 +248,19 @@ class SecurityErrorMessages:
             Formatted error message
         """
         return (
-            f"🚫 COMMAND BLOCKED: Cannot modify tests.json via bash\n\n"
+            f"🚫 COMMAND BLOCKED: Cannot modify feature_list.json via bash\n\n"
             f"Command: {command}\n\n"
-            f"Using bash commands (awk, jq, python, echo, etc.) to modify tests.json is blocked.\n\n"
+            f"Using bash commands (awk, jq, python, echo, etc.) to modify feature_list.json is blocked.\n\n"
             f"💡 How to fix:\n"
-            f"  1. Verify the test actually passes by running it\n"
+            f"  1. Verify the feature actually passes by running it\n"
             f"  2. Take a screenshot as evidence\n"
             f"  3. Check MCP output for console errors\n"
-            f"  4. Use the Edit tool to update the specific test entry\n\n"
+            f"  4. Use the Edit tool to update the specific feature entry\n\n"
             f"💡 Example workflow:\n"
             f"  • Navigate: mcp__playwright__navigate(url: 'http://localhost:6174')\n"
             f"  • Screenshot: mcp__playwright__screenshot(path: 'screenshots/issue-X/<id>-<timestamp>.png')\n"
             f"  • Read: screenshots/issue-X/<id>-<timestamp>.png (verify visually)\n"
-            f"  • Edit: tests.json (change specific test's passes: true)"
+            f"  • Edit: feature_list.json (change specific feature's passes: true)"
         )
 
     @staticmethod
