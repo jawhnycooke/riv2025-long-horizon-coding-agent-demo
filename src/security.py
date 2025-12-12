@@ -600,7 +600,7 @@ class SecurityValidator:
                 }
             }
 
-        # Additional validation for Edit/Write operations on tests.json
+        # Additional validation for Edit/Write operations on feature_list.json
         if tool_name in ["Edit", "Write", "MultiEdit"]:
             test_validation_result = (
                 SecurityValidator._validate_test_result_modification(
@@ -700,7 +700,7 @@ class SecurityValidator:
     def _validate_sed_command(command: str) -> dict[str, Any]:
         """Validate sed command against blocked patterns.
 
-        Prevents bulk modification of test results in tests.json.
+        Prevents bulk modification of feature results in feature_list.json.
         The agent must update test results individually after verification,
         not use sed to mass-update all tests as passing.
 

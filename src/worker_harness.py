@@ -733,10 +733,15 @@ Begin implementing {task.id} now.
         test_passes = self.check_test_status()
 
         if not test_passes:
-            # Test didn't pass - increment retry and continue
+            # Test didn't pass - check retry count BEFORE incrementing
+            # (self.assigned_task.retry_count is stale after increment_retry_count())
+            current_retry_count = self.assigned_task.retry_count if self.assigned_task else 0
+
+            # Increment retry count in the file
             self.increment_retry_count()
 
-            if self.assigned_task and self.assigned_task.retry_count >= self.config.max_retries_per_test:
+            # Check if we've exhausted retries (compare current count + 1 for the increment)
+            if self.assigned_task and (current_retry_count + 1) >= self.config.max_retries_per_test:
                 print(f"[WORKER] ❌ Test {self.assigned_task.id} failed after {self.config.max_retries_per_test} attempts")
                 return WorkerStatus.FAILED
 
