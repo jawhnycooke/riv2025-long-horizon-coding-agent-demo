@@ -308,7 +308,7 @@ When an error occurs:
 - Retry the exact same fix more than 3 times
 - Continue with a broken build for more than 5 minutes
 - Ignore TypeScript errors - they indicate real problems
-- Bulk-modify tests.json to hide failures
+- Bulk-modify feature_list.json to hide failures
 
 **ALWAYS:**
 - Read error messages carefully before attempting fixes
