@@ -245,7 +245,7 @@ export class ClaudeCodeStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['secretsmanager:GetSecretValue'],
       resources: [
-        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:claude-code/*`,
+        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${projectName}/*`,
       ],
     }));
 
@@ -254,7 +254,7 @@ export class ClaudeCodeStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['ssm:GetParameter'],
       resources: [
-        `arn:aws:ssm:${this.region}:${this.account}:parameter/claude-code/*`,
+        `arn:aws:ssm:${this.region}:${this.account}:parameter/${projectName}/*`,
       ],
     }));
 
