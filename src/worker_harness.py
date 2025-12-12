@@ -23,7 +23,7 @@ from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-from src.config import Provider, apply_provider_config, get_model_id
+from src.config import Provider, apply_provider_env, get_model_id
 from src.secrets import (
     BEDROCK_API_KEY_ENV_VAR,
     get_anthropic_api_key,
@@ -54,6 +54,7 @@ class WorkerHarness:
         self.assigned_task: TestTask | None = None
         self.session_start_time: datetime | None = None
         self.github_token: str | None = None
+        self.all_tests_exhausted: bool = False  # Set by select_next_task
 
     # =========================================================================
     # BEFORE Agent
@@ -267,9 +268,15 @@ class WorkerHarness:
         """Select the next failing test to work on.
 
         Returns:
-            TestTask if a failing test found, None if all pass
+            TestTask if a failing test found, None if all pass or all exhausted
+
+        Note:
+            Sets self.all_tests_exhausted = True if all failing tests have
+            reached max retries. Caller should check this flag to distinguish
+            between "all pass" and "all exhausted retries".
         """
         tests_path = self.config.tests_json_path
+        self.all_tests_exhausted = False  # Reset flag
 
         if not tests_path.exists():
             print("[WORKER] ⚠️ No tests.json found")
@@ -279,14 +286,20 @@ class WorkerHarness:
             with open(tests_path) as f:
                 tests_data = json.load(f)
 
-            # Find first failing test
+            # Track if we've seen any failing tests (even exhausted ones)
+            has_failing_tests = False
+            exhausted_count = 0
+
+            # Find first failing test that hasn't exhausted retries
             for test_data in tests_data:
                 if test_data.get("status") != "pass":
+                    has_failing_tests = True
                     task = TestTask.from_dict(test_data)
 
                     # Check retry limit
                     if task.retry_count >= self.config.max_retries_per_test:
                         print(f"[WORKER] ⏭️ Skipping {task.id} - max retries reached")
+                        exhausted_count += 1
                         continue
 
                     self.assigned_task = task
@@ -294,8 +307,15 @@ class WorkerHarness:
                     print(f"[WORKER]    Description: {task.description}")
                     return task
 
-            print("[WORKER] ✅ All tests pass - nothing to do")
-            return None
+            # Distinguish between "all pass" and "all exhausted"
+            if has_failing_tests:
+                # All failing tests have exhausted their retries
+                self.all_tests_exhausted = True
+                print(f"[WORKER] ❌ All {exhausted_count} failing tests exhausted retries")
+                return None
+            else:
+                print("[WORKER] ✅ All tests pass - nothing to do")
+                return None
 
         except (json.JSONDecodeError, KeyError) as e:
             print(f"[WORKER] ❌ Error reading tests.json: {e}")
@@ -433,9 +453,7 @@ Begin implementing {task.id} now.
         provider = Provider.BEDROCK if self.config.provider == "bedrock" else Provider.ANTHROPIC
 
         # Apply provider configuration
-        if provider == Provider.BEDROCK:
-            os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        apply_provider_config(provider)
+        apply_provider_env(provider)
 
         # Get API key based on provider
         if provider == Provider.ANTHROPIC:

@@ -170,6 +170,10 @@ def main() -> int:
 
     task = harness.select_next_task()
     if not task:
+        # Check if all tests actually pass or if all failing tests exhausted retries
+        if harness.all_tests_exhausted:
+            print("[WORKER] ❌ All failing tests exhausted retries - marking as FAILED")
+            return WorkerStatus.FAILED.value
         print("[WORKER] ✅ All tests pass - nothing to do!")
         return WorkerStatus.COMPLETE.value
 
