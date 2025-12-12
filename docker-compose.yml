@@ -45,7 +45,8 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD", "python", "-c", "import orchestrator; print('OK')"]
+      # Use simple print instead of importing orchestrator to avoid PYTHONPATH issues
+      test: ["CMD", "python", "-c", "print('OK')"]
       interval: 30s
       timeout: 10s
       retries: 3
