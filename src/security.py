@@ -14,8 +14,8 @@ from .config import (
     ALLOWED_NODE_PATTERNS,
     ALLOWED_PKILL_PATTERNS,
     ALLOWED_RM_COMMANDS,
+    BLOCKED_FEATURE_LIST_PATTERNS,
     BLOCKED_SED_PATTERNS,
-    BLOCKED_TESTS_JSON_PATTERNS,
 )
 from .error_messages import SecurityErrorMessages
 
@@ -486,10 +486,10 @@ class SecurityValidator:
                 return sed_result
             # If not blocked, fall through to general allow check
 
-        # Block any bash command that could modify tests.json (awk, jq, python, node, etc.)
-        tests_json_result = SecurityValidator._validate_tests_json_bash_command(command)
-        if tests_json_result:  # Non-empty means blocked
-            return tests_json_result
+        # Block any bash command that could modify feature_list.json (awk, jq, python, node, etc.)
+        feature_list_result = SecurityValidator._validate_feature_list_bash_command(command)
+        if feature_list_result:  # Non-empty means blocked
+            return feature_list_result
 
         # Block git init - creates nested repos that break commit tracking
         if first_word == "git":
@@ -600,7 +600,7 @@ class SecurityValidator:
                 }
             }
 
-        # Additional validation for Edit/Write operations on tests.json
+        # Additional validation for Edit/Write operations on feature_list.json
         if tool_name in ["Edit", "Write", "MultiEdit"]:
             test_validation_result = (
                 SecurityValidator._validate_test_result_modification(
@@ -700,7 +700,7 @@ class SecurityValidator:
     def _validate_sed_command(command: str) -> dict[str, Any]:
         """Validate sed command against blocked patterns.
 
-        Prevents bulk modification of test results in tests.json.
+        Prevents bulk modification of feature results in feature_list.json.
         The agent must update test results individually after verification,
         not use sed to mass-update all tests as passing.
 
@@ -712,10 +712,10 @@ class SecurityValidator:
         """
         for pattern in BLOCKED_SED_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
-                error_msg = SecurityErrorMessages.sed_tests_json_blocked(command)
+                error_msg = SecurityErrorMessages.sed_feature_list_blocked(command)
                 print(f"🚨 BLOCKED: {command}")
                 get_audit_logger().log_bash_command(
-                    command, blocked=True, reason="sed bulk-modify tests.json blocked"
+                    command, blocked=True, reason="sed bulk-modify feature_list.json blocked"
                 )
                 return _deny_response(error_msg)
         # sed command is allowed (doesn't match blocked patterns)
@@ -768,10 +768,10 @@ class SecurityValidator:
         return {}
 
     @staticmethod
-    def _validate_tests_json_bash_command(command: str) -> dict[str, Any]:
-        """Block bash commands that could modify tests.json.
+    def _validate_feature_list_bash_command(command: str) -> dict[str, Any]:
+        """Block bash commands that could modify feature_list.json.
 
-        Prevents use of awk, jq, python, node, echo, etc. to modify tests.json.
+        Prevents use of awk, jq, python, node, echo, etc. to modify feature_list.json.
         The agent must use the Edit tool with screenshot verification.
 
         Args:
@@ -780,12 +780,12 @@ class SecurityValidator:
         Returns:
             Hook response dict (empty if allowed, deny response if blocked)
         """
-        for pattern in BLOCKED_TESTS_JSON_PATTERNS:
+        for pattern in BLOCKED_FEATURE_LIST_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
-                error_msg = SecurityErrorMessages.bash_tests_json_blocked(command)
+                error_msg = SecurityErrorMessages.bash_feature_list_blocked(command)
                 print(f"🚨 BLOCKED: {command}")
                 get_audit_logger().log_bash_command(
-                    command, blocked=True, reason="bash modify tests.json blocked"
+                    command, blocked=True, reason="bash modify feature_list.json blocked"
                 )
                 return _deny_response(error_msg)
         return {}
@@ -819,8 +819,8 @@ class SecurityValidator:
         """
         file_path = tool_input.get("file_path", "")
 
-        # Only check tests.json modifications
-        if not file_path.endswith("tests.json"):
+        # Only check feature_list.json modifications
+        if not file_path.endswith("feature_list.json"):
             return None
 
         # Parse the edit to find which test is being marked as passing

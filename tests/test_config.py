@@ -220,8 +220,10 @@ class TestConstants:
     """Tests for configuration constants."""
 
     def test_default_model_is_valid(self) -> None:
-        """Default model is in the display names mapping."""
-        assert DEFAULT_MODEL in MODEL_DISPLAY_NAMES
+        """Default model is a valid Anthropic model ID."""
+        from src.config import ANTHROPIC_MODEL_IDS
+
+        assert DEFAULT_MODEL in ANTHROPIC_MODEL_IDS.values()
 
     def test_default_provider_is_anthropic(self) -> None:
         """Default provider is Anthropic."""
@@ -349,7 +351,10 @@ class TestBoto3Session:
         mock_boto3_session.assert_called_once_with(
             profile_name="test-profile", region_name="us-west-2"
         )
-        mock_session.client.assert_called_once_with("sts")
+        # Client is called with service name and optional config parameter
+        mock_session.client.assert_called_once()
+        call_args = mock_session.client.call_args
+        assert call_args[0][0] == "sts"  # First positional arg is service name
 
 
 class TestCompletionSignalSettings:

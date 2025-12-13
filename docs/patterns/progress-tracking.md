@@ -26,7 +26,7 @@ generated-app/claude-progress.txt
 ## Session 1 - 2025-01-15T10:00:00Z
 
 ### Context Recovery
-- Read tests.json: 10 tests pending
+- Read feature_list.json: 10 features pending
 - Read git log: Initial commit
 - Selected feature: T001 - Homepage
 
@@ -41,7 +41,7 @@ generated-app/claude-progress.txt
   - Console: No errors
 
 ### State at End
-- tests.json: 1 passed, 9 pending
+- feature_list.json: 1 passed, 9 pending
 - Last commit: abc1234 "feat: add homepage layout"
 - Next recommended: T002 - Navigation menu
 
@@ -50,8 +50,8 @@ generated-app/claude-progress.txt
 ## Session 2 - 2025-01-15T14:00:00Z
 
 ### Context Recovery
-- Read tests.json: 1 passed, 9 pending
-- Read claude-progress.txt: Session 1 completed T001
+- Read feature_list.json: 1 passed, 9 pending
+- Read claude-progress.txt: Session 1 completed homepage-renders
 - Selected feature: T002 - Navigation menu
 ...
 ```
@@ -64,7 +64,7 @@ Documents what the agent read at session start:
 
 ```markdown
 ### Context Recovery
-- Read tests.json: X passed, Y pending
+- Read feature_list.json: X passed, Y pending
 - Read git log: [recent commits]
 - Read claude-progress.txt: [summary of previous session]
 - Selected feature: [next feature to implement]
@@ -101,7 +101,7 @@ Documents the session ending state:
 
 ```markdown
 ### State at End
-- tests.json: X passed, Y pending, Z failed
+- feature_list.json: X passed, Y pending
 - Last commit: [hash] "[message]"
 - Next recommended: [suggestion for next session]
 - Blockers: [any issues encountered]
@@ -172,7 +172,7 @@ Session N+1 starts:
 ## Session 3 - 2025-01-16T09:30:00Z
 
 ### Context Recovery
-- tests.json: 4 passed, 6 pending
+- feature_list.json: 4 passed, 6 pending
 - Previous session: Completed T004 (user profile page)
 - Git log shows: 12 commits, last was "fix: profile avatar loading"
 - Selected: T005 - Settings page
@@ -195,7 +195,7 @@ Session N+1 starts:
   - Accessibility: All WCAG checks pass
 
 ### State at End
-- tests.json: 5 passed, 5 pending
+- feature_list.json: 5 passed, 5 pending
 - Last commit: jkl0123 "fix: accessibility improvements"
 - Next recommended: T006 - Dashboard analytics
 - Notes: Consider adding unit tests for Settings form

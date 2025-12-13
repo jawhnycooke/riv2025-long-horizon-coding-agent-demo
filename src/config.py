@@ -467,26 +467,26 @@ ALLOWED_PKILL_PATTERNS = [
 # Blocked sed patterns - prevent bulk modification of test results
 # These regex patterns match sed commands that should be blocked
 BLOCKED_SED_PATTERNS = [
-    # Block any sed command that modifies "passes" field in tests.json
-    r"sed.*passes.*tests\.json",
-    r"sed.*tests\.json.*passes",
-    # Block bulk true/false replacements in tests.json
-    r"sed.*false.*true.*tests\.json",
-    r"sed.*true.*false.*tests\.json",
+    # Block any sed command that modifies "passes" field in feature_list.json
+    r"sed.*passes.*feature_list\.json",
+    r"sed.*feature_list\.json.*passes",
+    # Block bulk true/false replacements in feature_list.json
+    r"sed.*false.*true.*feature_list\.json",
+    r"sed.*true.*false.*feature_list\.json",
 ]
 
-# Block any bash command that could modify tests.json
+# Block any bash command that could modify feature_list.json
 # Agent must use Edit tool with screenshot verification instead
-BLOCKED_TESTS_JSON_PATTERNS = [
-    r"awk.*tests\.json",
-    r"jq.*tests\.json",
-    r"python3?\s.*tests\.json",
-    r"node\s.*tests\.json",
-    r"echo.*>.*tests\.json",
-    r"cat.*>.*tests\.json",
-    r"printf.*>.*tests\.json",
-    r"tee.*tests\.json",
-    r">.*tests\.json",  # Any redirection to tests.json
+BLOCKED_FEATURE_LIST_PATTERNS = [
+    r"awk.*feature_list\.json",
+    r"jq.*feature_list\.json",
+    r"python3?\s.*feature_list\.json",
+    r"node\s.*feature_list\.json",
+    r"echo.*>.*feature_list\.json",
+    r"cat.*>.*feature_list\.json",
+    r"printf.*>.*feature_list\.json",
+    r"tee.*feature_list\.json",
+    r">.*feature_list\.json",  # Any redirection to feature_list.json
 ]
 
 

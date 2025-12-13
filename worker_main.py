@@ -76,11 +76,11 @@ def load_system_prompt(repo_dir: Path) -> str:
     print("📄 Using minimal embedded system prompt")
     return """You are Claude Code, an expert software engineer.
 
-You are implementing a specific test from tests.json. Your job is to:
-1. Read and understand the test requirement
+You are implementing a specific feature from feature_list.json. Your job is to:
+1. Read and understand the feature requirement
 2. Implement the feature to make the test pass
 3. Use Playwright MCP to take screenshots and verify your work
-4. Mark the test as "pass" in tests.json when verified
+4. Mark the feature as passing (set "passes": true) in feature_list.json when verified
 5. Commit your changes
 
 Tools available:
@@ -89,7 +89,7 @@ Tools available:
 - Browser: Playwright MCP (screenshot, click, fill, assert_visible)
 
 Important rules:
-- Focus ONLY on the assigned test
+- Focus ONLY on the assigned feature
 - Screenshot verification is REQUIRED before marking pass
 - Commit when done or when stuck after multiple attempts
 - Update claude-progress.txt with your progress
@@ -163,16 +163,26 @@ def main() -> int:
         return WorkerStatus.BROKEN_STATE.value
 
     # ==========================================================================
+    # BEFORE Agent: Feature List Generation (First Run)
+    # ==========================================================================
+
+    print("\n[WORKER] --- Phase 4: Feature List ---")
+
+    if not harness.ensure_feature_list_exists():
+        print("[WORKER] ❌ Failed to create or find feature_list.json")
+        return WorkerStatus.FAILED.value
+
+    # ==========================================================================
     # BEFORE Agent: Task Selection
     # ==========================================================================
 
-    print("\n[WORKER] --- Phase 4: Task Selection ---")
+    print("\n[WORKER] --- Phase 5: Task Selection ---")
 
     task = harness.select_next_task()
     if not task:
         # Check if all tests actually pass or if all failing tests exhausted retries
         if harness.all_tests_exhausted:
-            print("[WORKER] ❌ All failing tests exhausted retries - marking as FAILED")
+            print("[WORKER] ❌ All failing tests have exhausted retries")
             return WorkerStatus.FAILED.value
         print("[WORKER] ✅ All tests pass - nothing to do!")
         return WorkerStatus.COMPLETE.value
@@ -181,7 +191,7 @@ def main() -> int:
     # DURING Agent: Run Agent Session
     # ==========================================================================
 
-    print("\n[WORKER] --- Phase 5: Agent Session ---")
+    print("\n[WORKER] --- Phase 6: Agent Session ---")
     print(f"[WORKER] 📌 Assigned task: {task.id}")
     print(f"[WORKER] 📝 Description: {task.description}")
 
@@ -229,7 +239,7 @@ def main() -> int:
     # AFTER Agent: Validate Results
     # ==========================================================================
 
-    print("\n[WORKER] --- Phase 6: Validation ---")
+    print("\n[WORKER] --- Phase 7: Validation ---")
 
     # Check if a commit was made
     commit_made = harness.verify_commit_made()

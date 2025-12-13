@@ -150,9 +150,9 @@ You have absolutely unlimited time, so in this session it's ok to implement only
 
 ## Test Verification (CRITICAL - ENFORCED BY SYSTEM)
 
-For EACH test in tests.json, you MUST follow this exact process:
+For EACH feature in feature_list.json, you MUST follow this exact process:
 
-1. **Read the test steps** from tests.json
+1. **Read the feature steps** from feature_list.json
 2. **Execute the test** by performing the steps in the browser
 3. **Take a screenshot AND capture console output** using the playwright-test helper:
    ```bash
@@ -180,7 +180,7 @@ For EACH test in tests.json, you MUST follow this exact process:
 - The test ID cannot be determined from your edit
 
 **CRITICAL RULES:**
-- You MUST NOT bulk-update tests.json (sed/awk/jq/python/node are ALL BLOCKED)
+- You MUST NOT bulk-update feature_list.json (sed/awk/jq/python/node are ALL BLOCKED)
 - You MUST take AND view BOTH screenshot AND console log for each test
 - Console log MUST show `NO_CONSOLE_ERRORS` - fix any errors first!
 - Each test must have: `<TEST_ID>-*.png` AND `<TEST_ID>-console.txt`
@@ -227,7 +227,7 @@ For complex test scenarios that require programmatic interactions (clicks, form 
 Before signaling completion, ALL of these must be true:
 1. `npm run build` succeeds without errors (REQUIRED - do not proceed if build fails)
 2. All pages/features you implemented are verified working (not blank, not erroring)
-3. Each test in tests.json has been individually verified and marked as passing
+3. Each feature in feature_list.json has been individually verified and marked as passing
 4. No known broken features - if you discover something broken, FIX IT before completing
 
 Only after meeting ALL requirements:
@@ -243,7 +243,7 @@ The application is fully built and all features are working.
 - Build is failing
 - Any page shows blank/errors
 - You found issues but didn't fix them
-- You used sed/awk to bulk-modify tests.json
+- You used sed/awk to bulk-modify feature_list.json
 
 This message signals the session manager that you have finished this issue. Do NOT output this message until ALL tests pass and ALL features are working correctly.
 

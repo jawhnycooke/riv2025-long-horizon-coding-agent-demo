@@ -20,7 +20,7 @@ The article recommends using git commits as recovery checkpoints because:
 | State Machine | Track agent state | `agent_state.json` |
 | Git Manager | Commit and push changes | `src/git_manager.py` |
 | Progress Log | Session history | `claude-progress.txt` |
-| Tests JSON | Feature status | `tests.json` |
+| Feature List | Feature status | `feature_list.json` |
 
 ## State Machine
 
@@ -143,7 +143,7 @@ def session_startup(generation_dir: Path) -> dict:
 
     # 2. Read progress files
     context["progress"] = read_file(generation_dir / "claude-progress.txt")
-    context["tests"] = read_json(generation_dir / "tests.json")
+    context["features"] = read_json(generation_dir / "feature_list.json")
     context["state"] = read_json(generation_dir / "agent_state.json")
 
     # 3. Check git history
@@ -151,7 +151,7 @@ def session_startup(generation_dir: Path) -> dict:
     context["git_status"] = get_git_status(generation_dir)
 
     # 4. Select next feature
-    pending = [t for t in context["tests"]["tests"] if t["status"] == "pending"]
+    pending = [f for f in context["features"] if not f.get("passes", False)]
     context["next_feature"] = pending[0] if pending else None
 
     # 5. Run init script (if exists)
@@ -176,7 +176,7 @@ At the start of each session:
 
 1. Run `pwd` to confirm you're in the correct directory
 2. Read these files to understand current state:
-   - `tests.json` - Which features are done/pending
+   - `feature_list.json` - Which features are done/pending
    - `claude-progress.txt` - What happened in previous sessions
    - `agent_state.json` - Current state machine status
 3. Run `git log --oneline -10` to see recent commits
@@ -255,6 +255,6 @@ Session 6 starts:
 
 ## Related Patterns
 
-- [Feature List](./feature-list.md) - tests.json for status tracking
+- [Feature List](./feature-list.md) - feature_list.json for status tracking
 - [Progress Tracking](./progress-tracking.md) - Chronological log
 - [Verification](./verification.md) - Screenshot workflow

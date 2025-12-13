@@ -10,7 +10,7 @@ This system implements the **harness-enforced agent pattern** from Anthropic's [
 
 | Failure Mode | Problem | Harness Solution |
 |--------------|---------|------------------|
-| **Premature Completion** | Agent declares "done" after partial work | Harness validates all tests pass via tests.json |
+| **Premature Completion** | Agent declares "done" after partial work | Harness validates all tests pass via feature_list.json |
 | **Incomplete Implementation** | Half-finished features | Harness assigns ONE test per session |
 | **Inadequate Testing** | Marks complete without verification | Harness validates screenshot exists + was viewed |
 | **Inefficient Onboarding** | Wastes tokens on environment setup | Harness runs init.sh and smoke tests before agent |
@@ -110,7 +110,7 @@ flowchart TB
 - Smoke testing (fail fast if broken)
 - Task selection (ONE test per session)
 - Prompt construction (focused, single-task)
-- Completion validation (reads tests.json)
+- Completion validation (reads feature_list.json)
 - Exit status determination (CONTINUE, COMPLETE, FAILED)
 
 **Agent Responsibilities:**
@@ -170,7 +170,7 @@ flowchart TB
 
             subgraph AfterAgent["AFTER Agent"]
                 VerifyCommit["verify_commit_made()<br/>Check git log"]
-                CheckStatus["check_test_status()<br/>Read tests.json"]
+                CheckStatus["check_test_status()<br/>Read feature_list.json"]
                 DetermineExit["determine_exit_status()<br/>CONTINUE/COMPLETE/FAILED"]
                 Push["push_changes()<br/>git push origin"]
             end
@@ -224,8 +224,8 @@ sequenceDiagram
     participant Git as Git
 
     Note over Harness: BEFORE Agent
-    Harness->>FS: Read tests.json
-    FS-->>Harness: [{id: "sidebar-v1", status: "fail"}]
+    Harness->>FS: Read feature_list.json
+    FS-->>Harness: [{id: "sidebar-v1", passes: false}]
     Harness->>Harness: Select first failing test
     Harness->>Agent: Focused prompt for "sidebar-v1"
 
@@ -235,12 +235,12 @@ sequenceDiagram
     Agent->>MCP: screenshot(url, path)
     MCP-->>Agent: Screenshot saved
     Agent->>FS: Read screenshot (verify visually)
-    Agent->>FS: Edit tests.json (status: "pass")
+    Agent->>FS: Edit feature_list.json (passes: true)
     Agent->>Git: git commit -m "Implement sidebar"
 
     Note over Harness: AFTER Agent
-    Harness->>FS: Read tests.json
-    FS-->>Harness: [{id: "sidebar-v1", status: "pass"}]
+    Harness->>FS: Read feature_list.json
+    FS-->>Harness: [{id: "sidebar-v1", passes: true}]
     Harness->>Harness: Check if all tests pass
     Harness->>Git: git push origin agent-runtime
     Harness->>Harness: Return exit code
@@ -328,7 +328,7 @@ sequenceDiagram
 
     Note over Harness: AFTER Agent
     Harness->>Harness: Verify commit made
-    Harness->>Harness: Check tests.json status
+    Harness->>Harness: Check feature_list.json status
     Harness->>Harness: Determine exit status
     Harness->>Harness: Push changes
 
@@ -364,19 +364,19 @@ flowchart TD
     Servers --> Smoke{"HARNESS: Smoke Test<br/>App loads correctly?"}
 
     Smoke -->|Fail| BrokenState([Exit 3: BROKEN_STATE])
-    Smoke -->|Pass| SelectTest["HARNESS: Select ONE Test<br/>First failing test from tests.json"]
+    Smoke -->|Pass| SelectTest["HARNESS: Select ONE Feature<br/>First failing feature from feature_list.json"]
 
-    SelectTest --> AnyFailing{"Tests remaining?"}
+    SelectTest --> AnyFailing{"Features remaining?"}
     AnyFailing -->|No| Complete([Exit 1: COMPLETE])
-    AnyFailing -->|Yes| BuildPrompt["HARNESS: Build Focused Prompt<br/>Single test + context"]
+    AnyFailing -->|Yes| BuildPrompt["HARNESS: Build Focused Prompt<br/>Single feature + context"]
 
     BuildPrompt --> Agent["AGENT: Implement Feature<br/>Technical decisions"]
     Agent --> Screenshot["AGENT: Take Screenshot<br/>via Playwright MCP"]
     Screenshot --> Verify["AGENT: Verify Visually<br/>Read screenshot file"]
-    Verify --> MarkPass["AGENT: Mark Test Pass<br/>Edit tests.json"]
+    Verify --> MarkPass["AGENT: Mark Feature Pass<br/>Edit feature_list.json"]
     MarkPass --> Commit["AGENT: Commit Changes"]
 
-    Commit --> Validate["HARNESS: Validate Results<br/>Check tests.json status"]
+    Commit --> Validate["HARNESS: Validate Results<br/>Check feature_list.json status"]
     Validate --> TestPassed{"Test now passing?"}
 
     TestPassed -->|No| RetryCheck{"Retry limit reached?"}

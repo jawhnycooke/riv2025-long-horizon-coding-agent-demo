@@ -60,9 +60,9 @@ class WorkerConfig:
         return self.workspace_dir / self.github_repo.replace("/", "_")
 
     @property
-    def tests_json_path(self) -> Path:
-        """Path to tests.json file."""
-        return self.repo_dir / "tests.json"
+    def feature_list_path(self) -> Path:
+        """Path to feature_list.json file."""
+        return self.repo_dir / "feature_list.json"
 
     @property
     def progress_file_path(self) -> Path:
@@ -129,24 +129,24 @@ class TestTask:
         id: Unique test identifier
         description: Human-readable test description
         steps: Steps to verify the test passes
-        status: Current status (fail, pass, skip)
+        passes: Whether the test is passing (Anthropic-style boolean)
         retry_count: Number of times this test has been attempted
     """
 
     id: str
     description: str
     steps: str
-    status: str = "fail"
+    passes: bool = False
     retry_count: int = 0
 
     @classmethod
     def from_dict(cls, data: dict) -> "TestTask":
-        """Create TestTask from dictionary (tests.json format)."""
+        """Create TestTask from dictionary (feature_list.json format)."""
         return cls(
             id=data.get("id", ""),
             description=data.get("description", ""),
             steps=data.get("steps", ""),
-            status=data.get("status", "fail"),
+            passes=data.get("passes", False),
             retry_count=data.get("retry_count", 0),
         )
 
@@ -156,6 +156,6 @@ class TestTask:
             "id": self.id,
             "description": self.description,
             "steps": self.steps,
-            "status": self.status,
+            "passes": self.passes,
             "retry_count": self.retry_count,
         }

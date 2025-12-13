@@ -264,6 +264,114 @@ class WorkerHarness:
             print(f"[WORKER] ❌ Smoke test error: {e}")
             return False
 
+    def ensure_feature_list_exists(self) -> bool:
+        """Generate feature_list.json if it doesn't exist.
+
+        On first worker run for an issue, generates a comprehensive feature list
+        from BUILD_PLAN.md. Subsequent runs use the existing file.
+
+        Returns:
+            True if feature list exists or was generated successfully
+        """
+        if self.config.feature_list_path.exists():
+            print("[WORKER] ✅ feature_list.json exists")
+            return True
+
+        print("[WORKER] 📝 Generating feature_list.json (first run)...")
+        return self._run_initialization_agent()
+
+    def _run_initialization_agent(self) -> bool:
+        """Run a Claude agent to generate feature_list.json from BUILD_PLAN.md."""
+        # Load initialization prompt
+        init_prompt = self._load_initialization_prompt()
+
+        # Create agent client (reuse existing method)
+        client = self.create_agent_client(init_prompt)
+
+        # Run agent to generate feature list
+        try:
+            client.process(self._build_init_task_prompt())
+            if self.config.feature_list_path.exists():
+                print("[WORKER] ✅ feature_list.json generated successfully")
+                return True
+            else:
+                print("[WORKER] ❌ feature_list.json was not created")
+                return False
+        except Exception as e:
+            print(f"[WORKER] ❌ Failed to generate feature list: {e}")
+            return False
+
+    def _load_initialization_prompt(self) -> str:
+        """Load the initialization system prompt."""
+        prompt_path = Path(__file__).parent.parent / "prompts" / "initialization_prompt.txt"
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8")
+        return self._default_initialization_prompt()
+
+    def _default_initialization_prompt(self) -> str:
+        """Return default initialization system prompt if file not found."""
+        return """You are an expert software architect generating a comprehensive feature list.
+
+Your task is to analyze the BUILD_PLAN.md specification and create a
+feature_list.json file with 50-200 test cases that will guide implementation.
+
+## Guidelines
+
+1. **Order matters**: Start with foundational features (setup, auth, basic CRUD)
+   then progress to advanced features (real-time, integrations, edge cases)
+
+2. **Atomic features**: Each test should represent ONE implementable feature
+   that can be verified with a screenshot
+
+3. **Clear verification**: The "steps" field should describe exactly how to
+   verify the feature works (what to click, what to see)
+
+4. **Coverage**: Ensure tests cover:
+   - All pages/routes in the application
+   - All user interactions (forms, buttons, navigation)
+   - Error states and edge cases
+   - Responsive/mobile behavior
+   - Accessibility requirements
+
+5. **IDs**: Use kebab-case IDs that describe the feature
+   Good: "user-can-login", "sidebar-collapse-on-mobile"
+   Bad: "test1", "feature_a"
+
+Write the feature_list.json file using the Write tool.
+"""
+
+    def _build_init_task_prompt(self) -> str:
+        """Build the task prompt for initialization."""
+        build_plan = self._load_build_plan_summary()
+        return f"""Generate a comprehensive feature_list.json for this project.
+
+## Project Specification (BUILD_PLAN.md)
+{build_plan}
+
+## Output Requirements
+Create feature_list.json with 50-200 test cases covering:
+1. Core functionality (authentication, navigation, CRUD operations)
+2. UI/UX features (responsive design, accessibility, error states)
+3. Edge cases and error handling
+4. Integration points
+
+## JSON Format
+```json
+[
+  {{
+    "id": "unique-kebab-case-id",
+    "description": "Clear description of what to implement",
+    "steps": "Step-by-step verification instructions",
+    "passes": false,
+    "retry_count": 0
+  }}
+]
+```
+
+Order tests from foundational features to advanced features.
+Write the file to: {self.config.feature_list_path}
+"""
+
     def select_next_task(self) -> TestTask | None:
         """Select the next failing test to work on.
 
@@ -271,29 +379,29 @@ class WorkerHarness:
             TestTask if a failing test found, None if all pass or all exhausted
 
         Note:
-            Sets self.all_tests_exhausted = True if all failing tests have
-            reached max retries. Caller should check this flag to distinguish
-            between "all pass" and "all exhausted retries".
+            Sets self.all_tests_exhausted = True if there are failing tests but
+            all have reached max retries. This allows the caller to distinguish
+            between "all pass" and "all exhausted" states.
         """
-        tests_path = self.config.tests_json_path
+        feature_list_path = self.config.feature_list_path
         self.all_tests_exhausted = False  # Reset flag
 
-        if not tests_path.exists():
-            print("[WORKER] ⚠️ No tests.json found")
+        if not feature_list_path.exists():
+            print("[WORKER] ⚠️ No feature_list.json found")
             return None
 
         try:
-            with open(tests_path) as f:
+            with open(feature_list_path) as f:
                 tests_data = json.load(f)
 
-            # Track if we've seen any failing tests (even exhausted ones)
-            has_failing_tests = False
+            # Track if we found any failing tests (even if exhausted)
+            found_failing_tests = False
             exhausted_count = 0
 
-            # Find first failing test that hasn't exhausted retries
+            # Find first failing test (passes: false)
             for test_data in tests_data:
-                if test_data.get("status") != "pass":
-                    has_failing_tests = True
+                if not test_data.get("passes", False):
+                    found_failing_tests = True
                     task = TestTask.from_dict(test_data)
 
                     # Check retry limit
@@ -307,18 +415,19 @@ class WorkerHarness:
                     print(f"[WORKER]    Description: {task.description}")
                     return task
 
-            # Distinguish between "all pass" and "all exhausted"
-            if has_failing_tests:
-                # All failing tests have exhausted their retries
+            # Distinguish between "all pass" and "all failing tests exhausted"
+            if found_failing_tests:
+                # All failing tests have exhausted retries
                 self.all_tests_exhausted = True
-                print(f"[WORKER] ❌ All {exhausted_count} failing tests exhausted retries")
+                print(f"[WORKER] ⚠️ All {exhausted_count} failing tests have exhausted retries")
                 return None
             else:
+                # All tests actually pass
                 print("[WORKER] ✅ All tests pass - nothing to do")
                 return None
 
         except (json.JSONDecodeError, KeyError) as e:
-            print(f"[WORKER] ❌ Error reading tests.json: {e}")
+            print(f"[WORKER] ❌ Error reading feature_list.json: {e}")
             return None
 
     # =========================================================================
@@ -379,7 +488,7 @@ Implement this ONE feature:
 
 5. Read the screenshot with Read tool to verify visually
 
-6. Mark test as "pass" in tests.json using the Edit tool
+6. Mark feature as passing (set "passes": true) in feature_list.json using the Edit tool
 
 7. Commit your changes with a descriptive message
 
@@ -579,41 +688,41 @@ Begin implementing {task.id} now.
             print(f"[WORKER] ⚠️ Could not verify commit: {e}")
             return False
 
-    def check_test_status(self) -> str:
-        """Check the status of the assigned test in tests.json.
+    def check_test_status(self) -> bool:
+        """Check the status of the assigned test in feature_list.json.
 
         Returns:
-            Test status: "pass", "fail", or "unknown"
+            True if test passes, False otherwise
         """
         if not self.assigned_task:
-            return "unknown"
+            return False
 
-        tests_path = self.config.tests_json_path
+        feature_list_path = self.config.feature_list_path
 
         try:
-            with open(tests_path) as f:
+            with open(feature_list_path) as f:
                 tests_data = json.load(f)
 
             for test in tests_data:
                 if test.get("id") == self.assigned_task.id:
-                    status = test.get("status", "fail")
-                    print(f"[WORKER] 📊 Test {self.assigned_task.id} status: {status}")
-                    return status
+                    passes = test.get("passes", False)
+                    print(f"[WORKER] 📊 Test {self.assigned_task.id} passes: {passes}")
+                    return passes
 
-            return "unknown"
+            return False
         except Exception as e:
             print(f"[WORKER] ⚠️ Could not check test status: {e}")
-            return "unknown"
+            return False
 
     def increment_retry_count(self) -> None:
-        """Increment retry count for the assigned test in tests.json."""
+        """Increment retry count for the assigned test in feature_list.json."""
         if not self.assigned_task:
             return
 
-        tests_path = self.config.tests_json_path
+        feature_list_path = self.config.feature_list_path
 
         try:
-            with open(tests_path) as f:
+            with open(feature_list_path) as f:
                 tests_data = json.load(f)
 
             for test in tests_data:
@@ -621,7 +730,7 @@ Begin implementing {task.id} now.
                     test["retry_count"] = test.get("retry_count", 0) + 1
                     break
 
-            with open(tests_path, "w") as f:
+            with open(feature_list_path, "w") as f:
                 json.dump(tests_data, f, indent=2)
 
         except Exception as e:
@@ -636,13 +745,18 @@ Begin implementing {task.id} now.
             WorkerStatus indicating what should happen next
         """
         # Check if assigned test passed
-        test_status = self.check_test_status()
+        test_passes = self.check_test_status()
 
-        if test_status != "pass":
-            # Test didn't pass - increment retry and continue
+        if not test_passes:
+            # Test didn't pass - check retry count BEFORE incrementing
+            # (self.assigned_task.retry_count is stale after increment_retry_count())
+            current_retry_count = self.assigned_task.retry_count if self.assigned_task else 0
+
+            # Increment retry count in the file
             self.increment_retry_count()
 
-            if self.assigned_task and self.assigned_task.retry_count >= self.config.max_retries_per_test:
+            # Check if we've exhausted retries (compare current count + 1 for the increment)
+            if self.assigned_task and (current_retry_count + 1) >= self.config.max_retries_per_test:
                 print(f"[WORKER] ❌ Test {self.assigned_task.id} failed after {self.config.max_retries_per_test} attempts")
                 return WorkerStatus.FAILED
 
@@ -650,13 +764,13 @@ Begin implementing {task.id} now.
             return WorkerStatus.CONTINUE
 
         # Test passed - check if all tests pass
-        tests_path = self.config.tests_json_path
+        feature_list_path = self.config.feature_list_path
 
         try:
-            with open(tests_path) as f:
+            with open(feature_list_path) as f:
                 tests_data = json.load(f)
 
-            all_pass = all(t.get("status") == "pass" for t in tests_data)
+            all_pass = all(t.get("passes", False) for t in tests_data)
 
             if all_pass:
                 print("[WORKER] 🎉 ALL TESTS PASS - IMPLEMENTATION COMPLETE")

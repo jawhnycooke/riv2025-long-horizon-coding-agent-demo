@@ -62,8 +62,8 @@ Based on Anthropic's ["Effective Harnesses for Long-Running Agents"](https://www
 
 | Failure Mode | Problem | Harness Solution |
 |--------------|---------|------------------|
-| **Premature Completion** | Agent declares "done" early | Harness validates tests.json |
-| **Incomplete Implementation** | Half-finished features | ONE test per session |
+| **Premature Completion** | Agent declares "done" early | Harness validates feature_list.json |
+| **Incomplete Implementation** | Half-finished features | ONE feature per session |
 | **Inadequate Testing** | No verification | Must view screenshot |
 | **Inefficient Onboarding** | Token waste | Harness runs setup |
 
@@ -365,7 +365,8 @@ cdk deploy --all
 │   └── cloudwatch_metrics.py    # Metrics
 ├── prompts/
 │   ├── system_prompt.txt        # Full system prompt (legacy)
-│   └── worker_system_prompt.txt # Simplified worker prompt
+│   ├── worker_system_prompt.txt # Simplified worker prompt
+│   └── initialization_prompt.txt # Feature list generation prompt
 ├── infrastructure/lib/
 │   ├── claude-code-stack.ts     # Core infra
 │   ├── ecs-cluster-stack.ts     # ECS cluster
@@ -389,20 +390,39 @@ Example: `screenshots/issue-42/sidebar-collapse-1702345678.png`
 1. Agent takes Playwright screenshot via MCP with correct path
 2. Agent checks MCP output for console errors (shown in tool response)
 3. Agent reads screenshot with Read tool to verify visually
-4. Only then can agent mark test as passing (Edit tool on tests.json)
-5. Harness validates tests.json after agent exits
+4. Only then can agent mark feature as passing (Edit tool on feature_list.json)
+5. Harness validates feature_list.json after agent exits
 
 **Console Error Detection:**
 - Playwright MCP includes console output in its response
 - Agent reviews MCP output for `console.error` or `console.warn`
 - Console log files (`.txt`) are optional - not required for MCP workflow
 
-Security hooks block bulk modification of tests.json.
+Security hooks block bulk modification of feature_list.json.
 
 ## Completion
 
-The **harness** (not the agent) determines completion by reading tests.json:
-- All tests status = "pass" → Exit 1 (COMPLETE)
-- Assigned test not passing → Exit 0 (CONTINUE) or Exit 2 (FAILED)
+The **harness** (not the agent) determines completion by reading feature_list.json:
+- All features `passes: true` → Exit 1 (COMPLETE)
+- Assigned feature not passing → Exit 0 (CONTINUE) or Exit 2 (FAILED)
 
 This prevents premature completion claims by the agent.
+
+## Feature List Generation
+
+On first worker run for an issue, if `feature_list.json` doesn't exist, the harness runs an initialization agent to generate it from `BUILD_PLAN.md`:
+
+```json
+// feature_list.json format
+[
+  {
+    "id": "user-can-login",
+    "description": "User can log in with valid credentials",
+    "steps": "1. Navigate to /login\n2. Enter credentials\n3. Click Login\n4. Verify redirect to /dashboard",
+    "passes": false,
+    "retry_count": 0
+  }
+]
+```
+
+The initialization prompt (`prompts/initialization_prompt.txt`) guides the agent to create 50-200 atomic, verifiable test cases ordered from foundational to advanced features.

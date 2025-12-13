@@ -105,7 +105,7 @@ your-repo/
 │   ├── vite.config.ts        # Vite bundler config
 │   ├── tsconfig.json         # TypeScript config
 │   ├── index.html            # HTML entry point
-│   ├── tests.json            # E2E test specifications
+│   ├── feature_list.json     # Feature list with passes boolean
 │   ├── claude-progress.txt   # Progress tracking notes
 │   ├── agent_state.json      # Session state machine
 │   ├── src/

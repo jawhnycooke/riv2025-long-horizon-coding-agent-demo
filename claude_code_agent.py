@@ -1102,18 +1102,18 @@ You are enhancing an EXISTING application. Your task is to implement the feature
 
 ### 1. Understand the Existing Codebase
 - Start by reading `claude-progress.txt` to understand what has been implemented
-- Read `tests.json` to understand the test suite structure
+- Read `feature_list.json` to understand the feature list structure
 - Review the existing code structure before making changes
 
 ### 2. Preserve Existing Functionality
 - DO NOT break any existing features
-- DO NOT remove or modify existing tests in tests.json
+- DO NOT remove or modify existing tests in feature_list.json
 - All existing tests must continue to pass after your changes
 
 ### 3. Implement the New Feature
 - Add the requested functionality as described above
 - Follow the existing code patterns and style
-- Add NEW tests to tests.json for the new feature (append to existing array)
+- Add NEW tests to feature_list.json for the new feature (append to existing array)
 - Update claude-progress.txt with your changes
 
 ### 4. Testing Your Changes
@@ -1126,9 +1126,9 @@ You are enhancing an EXISTING application. Your task is to implement the feature
 - Backend MUST use port: {backend_port}
 
 ### 6. Test Verification (CRITICAL - ENFORCED BY SYSTEM)
-For EACH test in tests.json, you MUST follow this exact process:
+For EACH test in feature_list.json, you MUST follow this exact process:
 
-1. **Read the test steps** from tests.json
+1. **Read the test steps** from feature_list.json
 2. **Execute the test** by performing the steps in the browser
 3. **Take a screenshot AND capture console output** using the playwright-test helper:
    `node playwright-test.cjs --url http://localhost:6174 --test-id <TEST_ID> --output-dir screenshots/issue-$ISSUE_NUMBER --operation full`
@@ -1148,7 +1148,7 @@ For EACH test in tests.json, you MUST follow this exact process:
 - The test ID cannot be determined from your edit
 
 **CRITICAL RULES:**
-- You MUST NOT bulk-update tests.json (sed/awk/jq/python/node are ALL BLOCKED)
+- You MUST NOT bulk-update feature_list.json (sed/awk/jq/python/node are ALL BLOCKED)
 - You MUST take AND view BOTH screenshot AND console log for each test
 - Console log MUST show `NO_CONSOLE_ERRORS` - fix any errors first!
 - Each test must have: `<TEST_ID>-*.png` AND `<TEST_ID>-console.txt`
@@ -1158,7 +1158,7 @@ For EACH test in tests.json, you MUST follow this exact process:
 Before signaling completion, ALL of these must be true:
 1. `npm run build` succeeds without errors
 2. All pages/features you implemented are verified working (not blank, not erroring)
-3. Each test in tests.json has been individually verified and marked as passing
+3. Each test in feature_list.json has been individually verified and marked as passing
 4. No known broken features - if you discover something broken, FIX IT before completing
 
 Only after meeting ALL requirements:
@@ -1170,7 +1170,7 @@ Only after meeting ALL requirements:
 - Build is failing
 - Any page shows blank/errors
 - You found issues but didn't fix them
-- You used sed/awk to bulk-modify tests.json
+- You used sed/awk to bulk-modify feature_list.json
 
 Remember: You are ENHANCING an existing app, not building from scratch. Preserve what works, add what's needed.
 
@@ -1198,7 +1198,7 @@ The project has gone through many implementation sessions, and technical debt ha
 
 Start by understanding the current state:
 - Read `claude-progress.txt` to understand what's been implemented (and assess if it needs condensing)
-- Read `tests.json` to see the test suite structure
+- Read `feature_list.json` to see the feature list structure
 - Look at the git history to see patterns of commits
 - Survey the directory structure
 
@@ -1275,7 +1275,7 @@ You do not need to be too aggressive in cleaning up claude-progress.txt - you'll
 
 5. **Preserve what matters:**
    - Production code (src/, core config files)
-   - Current progress tracking (claude-progress.txt can be edited/condensed but never deleted; tests.json test completions must NEVER be modified)
+   - Current progress tracking (claude-progress.txt can be edited/condensed but never deleted; feature_list.json test completions must NEVER be modified)
    - Build/dev scripts that are actively used (init.sh, package.json)
    - Current prompts (prompts/)
    - Session logs (logs/ directory - these are for debugging, never modify or delete)
@@ -1285,8 +1285,8 @@ You do not need to be too aggressive in cleaning up claude-progress.txt - you'll
 
 ## Critical Rules
 
-- **NEVER modify tests.json test completions**
-- **NEVER delete src/, prompts/, claude-progress.txt, tests.json, logs/, human_backlog.json**
+- **NEVER modify feature_list.json test completions**
+- **NEVER delete src/, prompts/, claude-progress.txt, feature_list.json, logs/, human_backlog.json**
 - **NEVER modify or delete anything in logs/ directory** (session logs for debugging)
 - **NEVER modify or delete human_backlog.json** (contains explicit human feature/bug requests)
 - **NEVER implement new features or fix bugs** - this is cleanup only
@@ -1684,7 +1684,7 @@ CRITICAL PORT CONFIGURATION:
 
 """
             message += """
-You absolutely must start by writing a detailed testing plan in tests.json. This should include at least 200 extremely detailed end-to-end tests that must be completed using Playwright CLI for screenshots and manual verification. The JSON file should be an array of objects in this format:
+You absolutely must start by writing a detailed testing plan in feature_list.json. This should include at least 200 extremely detailed end-to-end tests that must be completed using Playwright CLI for screenshots and manual verification. The JSON file should be an array of objects in this format:
 [
   {"category": "functional",
     "description": "User can sign in and navigate to the home page",
@@ -1771,7 +1771,7 @@ CRITICAL PORT CONFIGURATION:
 - Backend MUST use port: {args.backend_port}
 - Verify these ports are correctly configured before starting any servers
 
-You absolutely must start by reading the claude-progress.txt and tests.json files and the git history to see how many tests have been completed and what work is remaining. DO NOT UNDER ANY CIRCUMSTANCES remove test cases from claude-progress.txt. You should only check a box for a unit test when it's perfectly done.
+You absolutely must start by reading the claude-progress.txt and feature_list.json files and the git history to see how many tests have been completed and what work is remaining. DO NOT UNDER ANY CIRCUMSTANCES remove test cases from claude-progress.txt. You should only check a box for a unit test when it's perfectly done.
 
 **CHECK FOR WIP COMMITS**: Run `git log --oneline -5` to check recent commits. If you see a commit starting with "wip:" (e.g., "wip: Session timeout approaching"), this means the previous session was interrupted by a timeout and created an automatic work-in-progress commit. This WIP commit contains all uncommitted work from the previous session. You should:
 1. Review what was being worked on from the WIP commit message
@@ -1816,7 +1816,7 @@ If `init.sh` already exists, you should run it to restart the servers. Otherwise
 
 `init.sh` should start by running a unit test suite. You should add to this unit test suite as you add new features, and make sure it continues to pass all tests before moving on to Playwright tests.
 
-CRITICAL: YOU CAN ONLY CHANGE ONE LINE OF THE tests.json FILE AT A TIME. THE ONLY CHANGES YOU CAN MAKE TO THE TESTS IS CHANGING THE "passes" FIELD, AND YOU MAY ONLY DO THIS WHEN YOU HAVE VERIFIED THAT A TEST PASSES BY DOING THE TESTING YOURSELF. IT IS CATASTROPHIC TO REMOVE OR EDIT TESTS BECAUSE THIS MEANS THAT FUNCTIONALITY COULD BE MISSING OR BUGGY.
+CRITICAL: YOU CAN ONLY CHANGE ONE LINE OF THE feature_list.json FILE AT A TIME. THE ONLY CHANGES YOU CAN MAKE TO THE FEATURES IS CHANGING THE "passes" FIELD, AND YOU MAY ONLY DO THIS WHEN YOU HAVE VERIFIED THAT A FEATURE PASSES BY DOING THE TESTING YOURSELF. IT IS CATASTROPHIC TO REMOVE OR EDIT FEATURES BECAUSE THIS MEANS THAT FUNCTIONALITY COULD BE MISSING OR BUGGY.
 
 **IMPORTANT**: If human_backlog.json exists, prioritize items in this order:
 1. Items with status "in progress" - finish what was started

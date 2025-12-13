@@ -126,13 +126,13 @@ class VerificationTracker:
 These attempts to bypass verification are blocked:
 
 ```bash
-# BLOCKED - Modifying tests.json without verification
-Edit tests.json "status": "pending" → "status": "passed"
-# Error: Must view screenshot for T001 before marking as passed
+# BLOCKED - Modifying feature_list.json without verification
+Edit feature_list.json "passes": false → "passes": true
+# Error: Must view screenshot for homepage-renders before marking as passed
 
 # BLOCKED - Bulk status changes
-sed -i 's/pending/passed/g' tests.json
-# Error: Bulk modification of tests.json is not allowed
+sed -i 's/false/true/g' feature_list.json
+# Error: Bulk modification of feature_list.json is not allowed
 ```
 
 ## Worker Verification Task
@@ -149,7 +149,7 @@ Steps:
 2. Take screenshot: npx playwright screenshot http://localhost:5173 screenshots/T001.png
 3. View the screenshot using Read tool
 4. Check for console errors
-5. If visual is correct, update tests.json status to "passed"
+5. If visual is correct, update feature_list.json passes to true
 6. Update claude-progress.txt with verification result
 """
 
@@ -211,27 +211,20 @@ async function captureConsole(url, outputPath) {
 }
 ```
 
-## Integration with tests.json
+## Integration with feature_list.json
 
 When verification passes:
 
 ```json
-{
-  "tests": [
-    {
-      "id": "T001",
-      "name": "Homepage renders correctly",
-      "status": "passed",
-      "screenshot": "screenshots/T001-homepage.png",
-      "verifiedAt": "2025-01-15T10:30:00Z",
-      "console": {
-        "errors": 0,
-        "warnings": 2,
-        "log": "logs/T001-console.json"
-      }
-    }
-  ]
-}
+[
+  {
+    "id": "homepage-renders",
+    "description": "Homepage renders correctly",
+    "steps": "Navigate to / and verify main content displays",
+    "passes": true,
+    "retry_count": 0
+  }
+]
 ```
 
 ## Verification Checklist
@@ -283,7 +276,7 @@ Read: logs/T005-console.json
 
 ### 6. Update Status
 ```
-Edit tests.json: T005 status "pending" → "passed"
+Edit feature_list.json: T005 passes false → true
 ```
 
 ### 7. Log Progress
@@ -305,6 +298,6 @@ Append to claude-progress.txt:
 
 ## Related Patterns
 
-- [Feature List](./feature-list.md) - tests.json structure
+- [Feature List](./feature-list.md) - feature_list.json structure
 - [Progress Tracking](./progress-tracking.md) - Logging verification results
 - [Session Recovery](./session-recovery.md) - Git commits after verification
