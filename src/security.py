@@ -875,29 +875,53 @@ class SecurityValidator:
             return _deny_response(error_msg)
 
         # =====================================================================
-        # Console Log Check (Optional - MCP shows console in output)
+        # Console Log Check (REQUIRED - playwright-test.cjs generates both)
         # =====================================================================
-        # With Playwright MCP, console errors are visible in the MCP tool output.
-        # Console log files are no longer required but checked if present.
+        # With Bash-based Playwright CLI, playwright-test.cjs always generates
+        # both screenshot and console log files. Console log must exist and
+        # contain NO_CONSOLE_ERRORS (not ERRORS:).
         console_pattern = (
             f"{project_root}/screenshots/issue-{issue_number}/{test_id}-console.txt"
         )
         console_files = glob.glob(console_pattern)
 
-        if console_files:
-            # Console log exists - verify it was viewed
-            console_viewed = any(was_screenshot_viewed(f) for f in console_files)
-            if not console_viewed:
-                print(f"⚠️ Console log exists for test '{test_id}' but not viewed")
-                print(f"   Consider viewing: {console_files[0]}")
-            else:
-                print(f"✅ Console log for '{test_id}' was viewed")
-        else:
-            # No console log file - that's OK with MCP (console shown in tool output)
-            print(f"ℹ️ No console log file for '{test_id}' (MCP shows console in output)")
+        if not console_files:
+            # Console log file is REQUIRED
+            error_msg = SecurityErrorMessages.test_no_console_log(
+                test_id, issue_number, console_pattern
+            )
+            print(f"🚨 BLOCKED: No console log file for test '{test_id}'")
+            return _deny_response(error_msg)
+
+        # Console log exists - verify it was viewed
+        console_viewed = any(was_screenshot_viewed(f) for f in console_files)
+        if not console_viewed:
+            error_msg = SecurityErrorMessages.test_console_not_viewed(
+                test_id, console_files[0]
+            )
+            print(f"🚨 BLOCKED: Console log exists for test '{test_id}' but not viewed")
+            return _deny_response(error_msg)
+
+        # Check for console errors in the log content
+        console_content = Path(console_files[0]).read_text().strip()
+        if console_content.startswith("ERRORS:"):
+            error_msg = (
+                f"🚫 TEST BLOCKED: Console errors detected for '{test_id}'\n\n"
+                f"{console_content}\n\n"
+                f"💡 How to fix:\n"
+                f"  1. Review the console errors listed above\n"
+                f"  2. Fix the errors in your code\n"
+                f"  3. Run playwright-test.cjs again to verify fix\n"
+                f"  4. Ensure console log shows NO_CONSOLE_ERRORS\n"
+                f"  5. Then mark the test as passing"
+            )
+            print(f"🚨 BLOCKED: Console errors found for test '{test_id}'")
+            return _deny_response(error_msg)
+
+        print(f"✅ Console log for '{test_id}' verified: NO_CONSOLE_ERRORS")
 
         print(
-            f"✅ Test '{test_id}' verified: screenshot exists and was viewed"
+            f"✅ Test '{test_id}' verified: screenshot and console log exist and were viewed"
         )
         return None  # Allow the edit
 

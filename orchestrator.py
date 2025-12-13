@@ -48,7 +48,7 @@ from claude_agent_sdk import (
 )
 
 from src.cloudwatch_metrics import MetricsPublisher
-from src.config import Provider, apply_provider_config, get_model_id
+from src.config import Provider, apply_provider_env, get_model_id
 from src.secrets import (
     BEDROCK_API_KEY_ENV_VAR,
     get_anthropic_api_key,
@@ -365,9 +365,7 @@ def create_orchestrator_client() -> ClaudeSDKClient:
     provider = Provider.BEDROCK if PROVIDER == "bedrock" else Provider.ANTHROPIC
 
     # Apply provider configuration
-    if provider == Provider.BEDROCK:
-        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
-    apply_provider_config(provider)
+    apply_provider_env(provider)
 
     # Get API key based on provider
     if provider == Provider.ANTHROPIC:

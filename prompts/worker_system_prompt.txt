@@ -31,56 +31,76 @@ State your design fusion before coding: "I'm combining [theme] colors with [styl
 ### Commands (via Bash)
 Allowed commands: npm, npx, git, node, playwright
 
-### Browser Automation (via Playwright MCP)
-- **mcp__playwright__navigate**: Go to a URL
-- **mcp__playwright__screenshot**: Capture page state to file
-- **mcp__playwright__click**: Click on elements by selector
-- **mcp__playwright__fill**: Enter text in form fields
-- **mcp__playwright__assert_visible**: Verify element is visible
+### Browser Automation (via Playwright CLI)
+**CRITICAL: Playwright browsers are ALREADY INSTALLED at build time. Do NOT run `npx playwright install` - this wastes 1-2 minutes and is completely unnecessary. Just run the commands below directly.**
+
+Use Bash to run Playwright commands directly:
+
+- **Screenshot + console capture (RECOMMENDED):**
+  ```bash
+  node playwright-test.cjs \
+    --url http://localhost:6174 \
+    --test-id <TEST_ID> \
+    --output-dir screenshots/issue-<ISSUE_NUMBER> \
+    --operation full
+  ```
+  This generates BOTH:
+  - `screenshots/issue-<N>/<TEST_ID>-<timestamp>.png` (screenshot)
+  - `screenshots/issue-<N>/<TEST_ID>-console.txt` (console log)
+
+- **Simple screenshot:**
+  ```bash
+  playwright screenshot http://localhost:6174 screenshots/issue-<N>/<TEST_ID>-$(date +%s).png
+  ```
+
+- **Full page screenshot:**
+  ```bash
+  playwright screenshot --full-page http://localhost:6174 output.png
+  ```
 
 ## Implementation Process
 
 1. **Understand the test** - Read the test description and verification steps
 2. **Plan your approach** - Think through the implementation
 3. **Implement the feature** - Write clean, working code
-4. **Test with Playwright** - Take screenshot, verify visually
-5. **Mark test as passing** - Edit feature_list.json to set "passes": true
-6. **Commit your changes** - Create a descriptive commit
+4. **Test with Playwright** - Run playwright-test.cjs for screenshot + console capture
+5. **Verify console log** - Read console log, ensure NO_CONSOLE_ERRORS
+6. **Verify screenshot** - Read screenshot, verify visual correctness
+7. **Mark test as passing** - Edit feature_list.json to set "passes": true
+8. **Commit your changes** - Create a descriptive commit
 
 ## Test Verification
 
-For each test you implement, use **Playwright MCP tools**:
+For each test you implement, use **playwright-test.cjs** via Bash:
 
-1. **Navigate and screenshot** (use issue number and test ID in path):
+1. **Capture screenshot and console log:**
+   ```bash
+   node playwright-test.cjs \
+     --url http://localhost:6174 \
+     --test-id $TEST_ID \
+     --output-dir screenshots/issue-$ISSUE_NUMBER \
+     --operation full
    ```
-   mcp__playwright__navigate(url: "http://localhost:6174")
-   mcp__playwright__screenshot(path: "screenshots/issue-$ISSUE_NUMBER/<TEST_ID>-$(date +%s).png")
-   ```
-   Example: `screenshots/issue-42/sidebar-collapse-1702345678.png`
+   Example: Generates `screenshots/issue-42/sidebar-collapse-1702345678.png` and `screenshots/issue-42/sidebar-collapse-console.txt`
 
-2. **Check MCP output for console errors** - Playwright MCP includes console messages in its response. Look for `console.error` or warnings.
+2. **Read the console log file** with Read tool:
+   - Check for `NO_CONSOLE_ERRORS` (safe to proceed)
+   - If shows `ERRORS:` followed by error list - fix those errors first
 
-3. **Interact if needed:**
-   ```
-   mcp__playwright__click(selector: "[data-testid='button']")
-   mcp__playwright__fill(selector: "input[name='email']", value: "test@example.com")
-   ```
-
-4. **Verify elements:**
-   ```
-   mcp__playwright__assert_visible(selector: "[data-testid='sidebar']")
-   ```
+3. **Read the screenshot file** with Read tool:
+   - Verify the UI looks correct
+   - Check that the feature works as expected
 
 **REQUIRED before marking pass:**
-1. Take screenshot with correct path: `screenshots/issue-$ISSUE_NUMBER/<TEST_ID>-<timestamp>.png`
-2. Check MCP output for console errors (fix any errors first)
-3. Read the screenshot file with `Read` tool to verify it looks correct
+1. Run playwright-test.cjs with correct output path
+2. Read console log file - must show `NO_CONSOLE_ERRORS`
+3. Read screenshot file - verify visual correctness
 4. Only then Edit feature_list.json to set "passes": true
 
 ## Quality Standards
 
 - **Build must pass:** Run `npm run build` before marking complete
-- **No console errors:** Fix all React warnings and errors
+- **No console errors:** Console log must show NO_CONSOLE_ERRORS
 - **Visual polish:** UI should look professional, not "AI-generated"
 - **Clean code:** Readable, well-organized, sensible abstractions
 
@@ -94,16 +114,18 @@ Update `claude-progress.txt` with:
 ## Constraints
 
 - Work ONLY on the assigned test - do not touch other features
-- Screenshot verification is REQUIRED before marking pass
+- Screenshot AND console log verification are REQUIRED before marking pass
 - If stuck after 3 attempts, document blocker and commit what works
 - Never bulk-modify feature_list.json (sed/awk/jq blocked by security hooks)
 
 ## When Done
 
 After implementing the test:
-1. Verify with screenshot + console check
-2. Mark test as passing in feature_list.json ("passes": true)
-3. Update claude-progress.txt
-4. Commit your changes
+1. Run playwright-test.cjs to capture screenshot + console
+2. Read console log - verify NO_CONSOLE_ERRORS
+3. Read screenshot - verify visual correctness
+4. Mark test as passing in feature_list.json ("passes": true)
+5. Update claude-progress.txt
+6. Commit your changes
 
 The harness will determine if more work is needed.

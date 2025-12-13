@@ -84,19 +84,28 @@ export class EcsClusterStack extends cdk.Stack {
     // ========================================================================
     // CloudWatch Log Groups
     // ========================================================================
+    // Map logRetentionDays to CDK RetentionDays enum
+    const retentionMap: { [key: number]: logs.RetentionDays } = {
+      1: logs.RetentionDays.ONE_DAY,
+      3: logs.RetentionDays.THREE_DAYS,
+      5: logs.RetentionDays.FIVE_DAYS,
+      7: logs.RetentionDays.ONE_WEEK,
+      14: logs.RetentionDays.TWO_WEEKS,
+      30: logs.RetentionDays.ONE_MONTH,
+      60: logs.RetentionDays.TWO_MONTHS,
+      90: logs.RetentionDays.THREE_MONTHS,
+    };
+    const logRetention = retentionMap[logRetentionDays] ?? logs.RetentionDays.TWO_WEEKS;
+
     const orchestratorLogGroup = new logs.LogGroup(this, 'OrchestratorLogs', {
       logGroupName: `/ecs/${projectName}-${environment}/orchestrator`,
-      retention: logRetentionDays === 7
-        ? logs.RetentionDays.ONE_WEEK
-        : logs.RetentionDays.TWO_WEEKS,
+      retention: logRetention,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
     const workerLogGroup = new logs.LogGroup(this, 'WorkerLogs', {
       logGroupName: `/ecs/${projectName}-${environment}/worker`,
-      retention: logRetentionDays === 7
-        ? logs.RetentionDays.ONE_WEEK
-        : logs.RetentionDays.TWO_WEEKS,
+      retention: logRetention,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
@@ -121,7 +130,7 @@ export class EcsClusterStack extends cdk.Stack {
         'secretsmanager:GetSecretValue',
       ],
       resources: [
-        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:claude-code/*`,
+        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${projectName}/*`,
       ],
     }));
 
@@ -138,7 +147,7 @@ export class EcsClusterStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['secretsmanager:GetSecretValue'],
       resources: [
-        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:claude-code/*`,
+        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${projectName}/*`,
       ],
     }));
 
@@ -185,13 +194,18 @@ export class EcsClusterStack extends cdk.Stack {
         ENVIRONMENT: environment,
         AWS_REGION: this.region,
         POLL_INTERVAL_SECONDS: '300',
+        // Orchestrator-specific environment variables
+        // STATE_MACHINE_ARN is set dynamically after Step Functions stack deploys
+        // These are placeholders - actual values configured via GitHub Actions or task overrides
+        GITHUB_REPOSITORY: '', // Set via task override or GitHub Actions
+        AUTHORIZED_APPROVERS: '', // Set via task override or GitHub Actions
       },
       secrets: {
         ANTHROPIC_API_KEY: ecs.Secret.fromSecretsManager(
-          secretsmanager.Secret.fromSecretNameV2(this, 'OrchestratorAnthropicKey', `claude-code/${environment}/anthropic-api-key`)
+          secretsmanager.Secret.fromSecretNameV2(this, 'OrchestratorAnthropicKey', `${projectName}/${environment}/anthropic-api-key`)
         ),
         GITHUB_TOKEN: ecs.Secret.fromSecretsManager(
-          secretsmanager.Secret.fromSecretNameV2(this, 'OrchestratorGitHubToken', `claude-code/${environment}/github-token`)
+          secretsmanager.Secret.fromSecretNameV2(this, 'OrchestratorGitHubToken', `${projectName}/${environment}/github-token`)
         ),
       },
       healthCheck: {
@@ -211,12 +225,12 @@ export class EcsClusterStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
 
-    // Worker needs: Secrets Manager, S3 (screenshots), CloudWatch metrics
+    // Worker needs: Secrets Manager, S3 (screenshots + previews), CloudWatch metrics
     workerTaskRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['secretsmanager:GetSecretValue'],
       resources: [
-        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:claude-code/*`,
+        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${projectName}/*`,
       ],
     }));
 
@@ -228,8 +242,12 @@ export class EcsClusterStack extends cdk.Stack {
         's3:ListBucket',
       ],
       resources: [
+        // Screenshots bucket
         `arn:aws:s3:::${projectName}-${environment}-screenshots`,
         `arn:aws:s3:::${projectName}-${environment}-screenshots/*`,
+        // Previews bucket (app preview deployments)
+        `arn:aws:s3:::${projectName}-${environment}-previews`,
+        `arn:aws:s3:::${projectName}-${environment}-previews/*`,
       ],
     }));
 
@@ -265,6 +283,11 @@ export class EcsClusterStack extends cdk.Stack {
       },
     });
 
+    // Worker environment variables:
+    // - ENVIRONMENT, AWS_REGION, WORKER_MODE: Set here in base config
+    // - ISSUE_NUMBER, GITHUB_REPOSITORY, PROVIDER: Injected via Step Functions containerOverrides
+    //   (see step-functions-stack.ts lines 95-117)
+    // This split allows the state machine to dynamically configure each worker invocation.
     this.workerContainer = this.workerTaskDef.addContainer('worker', {
       containerName: 'worker',
       image: ecs.ContainerImage.fromEcrRepository(repository, 'worker-latest'),
@@ -276,13 +299,15 @@ export class EcsClusterStack extends cdk.Stack {
         ENVIRONMENT: environment,
         AWS_REGION: this.region,
         WORKER_MODE: 'true',
+        // Additional env vars (ISSUE_NUMBER, GITHUB_REPOSITORY, PROVIDER)
+        // are injected by Step Functions via containerOverrides
       },
       secrets: {
         ANTHROPIC_API_KEY: ecs.Secret.fromSecretsManager(
-          secretsmanager.Secret.fromSecretNameV2(this, 'WorkerAnthropicKey', `claude-code/${environment}/anthropic-api-key`)
+          secretsmanager.Secret.fromSecretNameV2(this, 'WorkerAnthropicKey', `${projectName}/${environment}/anthropic-api-key`)
         ),
         GITHUB_TOKEN: ecs.Secret.fromSecretsManager(
-          secretsmanager.Secret.fromSecretNameV2(this, 'WorkerGitHubToken', `claude-code/${environment}/github-token`)
+          secretsmanager.Secret.fromSecretNameV2(this, 'WorkerGitHubToken', `${projectName}/${environment}/github-token`)
         ),
       },
     });
@@ -325,6 +350,18 @@ export class EcsClusterStack extends cdk.Stack {
       value: workerLogGroup.logGroupName,
       description: 'Worker CloudWatch log group',
       exportName: `${projectName}-${environment}-worker-logs`,
+    });
+
+    new cdk.CfnOutput(this, 'OrchestratorSecurityGroupId', {
+      value: this.orchestratorSecurityGroup.securityGroupId,
+      description: 'Orchestrator security group ID',
+      exportName: `${projectName}-${environment}-orchestrator-sg`,
+    });
+
+    new cdk.CfnOutput(this, 'WorkerSecurityGroupId', {
+      value: this.workerSecurityGroup.securityGroupId,
+      description: 'Worker security group ID',
+      exportName: `${projectName}-${environment}-worker-sg`,
     });
   }
 }

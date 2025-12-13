@@ -51,6 +51,13 @@ export class ClaudeCodeStack extends cdk.Stack {
     // ========================================================================
     // VPC - Required for EFS and ECS
     // ========================================================================
+    // NOTE: VPC uses public subnets only (no NAT gateways) for cost savings.
+    // ECS tasks use assignPublicIp: true for outbound internet access.
+    // Trade-offs:
+    // - Cost: No NAT gateway charges (~$0.045/hour/gateway)
+    // - Security: Containers have public IPs (but security groups restrict inbound)
+    // - Scaling: Limited by available public IPs (not typically an issue for this use case)
+    // For production with strict security requirements, add natGateways: 1 and use PRIVATE subnets.
     this.vpc = new ec2.Vpc(this, 'VPC', {
       maxAzs: 2,
       natGateways: 0,
@@ -90,6 +97,9 @@ export class ClaudeCodeStack extends cdk.Stack {
     });
 
     // Create access point for worker containers
+    // UID/GID 1000 matches the default non-root user in the python:3.12-slim image.
+    // If the container runs as root (UID 0), EFS access will work due to IAM authorization.
+    // The access point enforces these credentials regardless of container user.
     this.accessPoint = this.fileSystem.addAccessPoint('AgentAccessPoint', {
       path: '/projects',
       createAcl: {
@@ -106,12 +116,17 @@ export class ClaudeCodeStack extends cdk.Stack {
     // ========================================================================
     // Secrets Manager - Store API keys and tokens
     // ========================================================================
+    // Note: Secrets are referenced by name in ECS stack using fromSecretNameV2().
+    // This pattern avoids circular dependencies but requires secrets to exist before
+    // deploying dependent stacks. If you need tighter coupling, export secret ARNs
+    // via CfnOutput and use Fn.importValue() in consuming stacks.
     const anthropicApiKey = new secretsmanager.Secret(this, 'AnthropicApiKey', {
       secretName: `${projectName}/${environment}/anthropic-api-key`,
       description: 'Anthropic API key for Claude Code Agent',
     });
 
     // Import existing GitHub token secret (created manually)
+    // To create: aws secretsmanager create-secret --name "project/env/github-token" --secret-string "ghp_..."
     const githubToken = secretsmanager.Secret.fromSecretNameV2(
       this,
       'GitHubToken',
@@ -122,11 +137,22 @@ export class ClaudeCodeStack extends cdk.Stack {
     // CloudWatch Log Group - For core infrastructure observability
     // Note: ECS task logs are managed by EcsClusterStack
     // ========================================================================
+    // Map logRetentionDays to CDK RetentionDays enum
+    const retentionMap: { [key: number]: logs.RetentionDays } = {
+      1: logs.RetentionDays.ONE_DAY,
+      3: logs.RetentionDays.THREE_DAYS,
+      5: logs.RetentionDays.FIVE_DAYS,
+      7: logs.RetentionDays.ONE_WEEK,
+      14: logs.RetentionDays.TWO_WEEKS,
+      30: logs.RetentionDays.ONE_MONTH,
+      60: logs.RetentionDays.TWO_MONTHS,
+      90: logs.RetentionDays.THREE_MONTHS,
+    };
+    const logRetention = retentionMap[logRetentionDays] ?? logs.RetentionDays.TWO_WEEKS;
+
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
       logGroupName: `/claude-code/${projectName}-${environment}`,
-      retention: logRetentionDays === 7
-        ? logs.RetentionDays.ONE_WEEK
-        : logs.RetentionDays.TWO_WEEKS,
+      retention: logRetention,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
@@ -219,7 +245,7 @@ export class ClaudeCodeStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['secretsmanager:GetSecretValue'],
       resources: [
-        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:claude-code/*`,
+        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${projectName}/*`,
       ],
     }));
 
@@ -228,7 +254,7 @@ export class ClaudeCodeStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['ssm:GetParameter'],
       resources: [
-        `arn:aws:ssm:${this.region}:${this.account}:parameter/claude-code/*`,
+        `arn:aws:ssm:${this.region}:${this.account}:parameter/${projectName}/*`,
       ],
     }));
 
@@ -387,6 +413,11 @@ function handler(event) {
     }));
 
     // Grant the GitHub Actions deployer user permission to assume the preview deploy role
+    // PREREQUISITE: The IAM user 'github-actions-deployer' must be created manually before deployment.
+    // Create it via AWS Console or CLI:
+    //   aws iam create-user --user-name github-actions-deployer
+    //   aws iam create-access-key --user-name github-actions-deployer
+    // Store the access key in GitHub Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
     const githubActionsUser = iam.User.fromUserName(
       this,
       'GitHubActionsUser',
@@ -623,6 +654,66 @@ function handler(event) {
         height: 8,
       }),
     );
+
+    // ========================================================================
+    // CloudWatch Alarms - Critical failure alerting
+    // ========================================================================
+    // Note: These alarms use CloudWatch Logs-based metrics.
+    // For full alerting, configure SNS topic and subscriptions manually.
+    // Example: aws sns subscribe --topic-arn <alarm-topic-arn> --protocol email --notification-endpoint your@email.com
+
+    // Alarm: High error rate in worker logs
+    const workerErrorMetric = new cloudwatch.Metric({
+      namespace: 'AWS/Logs',
+      metricName: 'IncomingLogEvents',
+      dimensionsMap: {
+        LogGroupName: workerLogGroupName,
+      },
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    });
+
+    // Create a metric filter for ERROR level logs
+    // This creates a custom metric that can be alarmed on
+    new logs.MetricFilter(this, 'WorkerErrorFilter', {
+      logGroup: logs.LogGroup.fromLogGroupName(this, 'WorkerLogGroupRef', workerLogGroupName),
+      metricNamespace: 'ClaudeCodeAgent/Errors',
+      metricName: 'WorkerErrors',
+      filterPattern: logs.FilterPattern.anyTerm('ERROR', 'error', 'Error', 'FAILED', 'Exception'),
+      metricValue: '1',
+    });
+
+    new cloudwatch.Alarm(this, 'WorkerErrorAlarm', {
+      alarmName: `${projectName}-${environment}-worker-errors`,
+      alarmDescription: 'Worker container error rate is elevated',
+      metric: new cloudwatch.Metric({
+        namespace: 'ClaudeCodeAgent/Errors',
+        metricName: 'WorkerErrors',
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 10,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+
+    // Alarm: Heartbeat missing (orchestrator not publishing metrics)
+    new cloudwatch.Alarm(this, 'HeartbeatMissingAlarm', {
+      alarmName: `${projectName}-${environment}-heartbeat-missing`,
+      alarmDescription: 'Orchestrator heartbeat has not been received - orchestrator may be down',
+      metric: new cloudwatch.Metric({
+        namespace: 'ClaudeCodeAgent',
+        metricName: 'Heartbeat',
+        dimensionsMap: { Environment: environment },
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(10),
+      }),
+      threshold: 1,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING, // Missing data = orchestrator is down
+    });
 
     // ========================================================================
     // Outputs

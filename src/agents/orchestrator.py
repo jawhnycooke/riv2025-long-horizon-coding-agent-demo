@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from claude_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
 
 from src.security import SecurityValidator
 from src.tracing import get_tracing_manager
@@ -139,6 +139,10 @@ def create_agent_client(
             ],
             disallowed_tools=[],
             mcp_servers={},
+            # Bypass permission prompts for headless container execution
+            # Security is enforced via hooks below, not interactive prompts
+            # See: https://platform.claude.com/docs/en/agent-sdk/permissions
+            permission_mode="bypassPermissions",
             hooks={
                 "PreToolUse": [
                     HookMatcher(

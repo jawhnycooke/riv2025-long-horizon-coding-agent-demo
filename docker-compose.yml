@@ -45,7 +45,8 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD", "python", "-c", "import orchestrator; print('OK')"]
+      # Use simple print instead of importing orchestrator to avoid PYTHONPATH issues
+      test: ["CMD", "python", "-c", "print('OK')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -60,12 +61,9 @@ services:
       dockerfile: Dockerfile.worker
     container_name: claude-code-worker
 
-    # Worker runs in worker mode
-    command: >
-      python claude_code_agent.py
-      --worker-mode
-      --issue ${ISSUE_NUMBER:-1}
-      --github-repo ${GITHUB_REPOSITORY}
+    # Worker runs via harness-based entry point (preferred)
+    # Environment variables are passed to worker_main.py
+    command: ["python", "worker_main.py"]
 
     # Mount for EFS simulation
     volumes:
@@ -87,7 +85,9 @@ services:
       - AWS_REGION=${AWS_REGION:-us-west-2}
 
     # Network for local development
-    network_mode: host
+    # Note: 'host' mode doesn't work on macOS, use 'bridge' (default) instead
+    # The worker accesses localhost via host.docker.internal on macOS/Windows
+    network_mode: bridge
 
     # Resource limits (full build environment)
     deploy:

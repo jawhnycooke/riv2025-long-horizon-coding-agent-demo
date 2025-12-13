@@ -55,11 +55,22 @@ export class StepFunctionsStack extends cdk.Stack {
     // ========================================================================
     // CloudWatch Log Group for Step Functions
     // ========================================================================
+    // Map logRetentionDays to CDK RetentionDays enum
+    const retentionMap: { [key: number]: logs.RetentionDays } = {
+      1: logs.RetentionDays.ONE_DAY,
+      3: logs.RetentionDays.THREE_DAYS,
+      5: logs.RetentionDays.FIVE_DAYS,
+      7: logs.RetentionDays.ONE_WEEK,
+      14: logs.RetentionDays.TWO_WEEKS,
+      30: logs.RetentionDays.ONE_MONTH,
+      60: logs.RetentionDays.TWO_MONTHS,
+      90: logs.RetentionDays.THREE_MONTHS,
+    };
+    const logRetention = retentionMap[logRetentionDays] ?? logs.RetentionDays.TWO_WEEKS;
+
     const sfnLogGroup = new logs.LogGroup(this, 'StateMachineLogs', {
       logGroupName: `/aws/stepfunctions/${projectName}-${environment}-worker`,
-      retention: logRetentionDays === 7
-        ? logs.RetentionDays.ONE_WEEK
-        : logs.RetentionDays.TWO_WEEKS,
+      retention: logRetention,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
@@ -206,6 +217,9 @@ export class StepFunctionsStack extends cdk.Stack {
     }));
 
     // Grant CloudWatch Events permissions for task state changes
+    // Step Functions uses a managed rule to track ECS task completion.
+    // The rule name pattern is: StepFunctionsGetEventsForECSTaskRule
+    // We grant wildcard to handle any variation CDK might create.
     this.stateMachine.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
@@ -214,7 +228,7 @@ export class StepFunctionsStack extends cdk.Stack {
         'events:DescribeRule',
       ],
       resources: [
-        `arn:aws:events:${this.region}:${this.account}:rule/StepFunctionsGetEventsForECSTaskRule`,
+        `arn:aws:events:${this.region}:${this.account}:rule/StepFunctions*`,
       ],
     }));
 

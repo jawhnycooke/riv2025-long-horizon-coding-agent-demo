@@ -115,7 +115,7 @@ show_missing = true
 # mypy configuration
 # ============================================================================
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -173,7 +173,7 @@ extend-exclude = '''
 # ============================================================================
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [

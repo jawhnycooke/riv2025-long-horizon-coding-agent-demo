@@ -192,7 +192,32 @@ flowchart TB
 
 | Server | Package | Purpose |
 |--------|---------|---------|
-| Playwright | `@anthropic/mcp-server-playwright` | Browser automation |
+| Playwright | `@playwright/mcp` | Browser automation ([docs](https://github.com/microsoft/playwright-mcp)) |
+
+## SDK Permissions
+
+Both orchestrator and worker use `permission_mode="bypassPermissions"` for headless container execution.
+
+**Why bypass?** Containers have no interactive terminal for permission prompts. Security is enforced via hooks instead.
+
+| Mode | Use Case |
+|------|----------|
+| `default` | Interactive CLI with user prompts |
+| `acceptEdits` | Auto-approve file edits only |
+| `bypassPermissions` | Headless/automated containers (our mode) |
+
+**Security model:** Hooks validate all tool calls - see `src/security.py`
+
+> **⚠️ Production Note:** This demo uses `bypassPermissions` for simplicity. In production deployments, you should:
+> - Use `acceptEdits` mode with selective tool allowlists
+> - Implement comprehensive `PreToolUse` hooks to validate each operation
+> - Consider `canUseTool` callbacks for dynamic permission logic
+> - Restrict `allowed_tools` to only what's necessary for the task
+> - Add explicit deny rules for sensitive operations
+>
+> The `bypassPermissions` mode grants full system access - appropriate for isolated demo containers but requires additional safeguards in production.
+
+Docs: https://platform.claude.com/docs/en/agent-sdk/permissions
 
 ## Orchestrator Flow
 

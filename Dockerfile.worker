@@ -19,10 +19,13 @@
 # - Commit and push changes to git
 # - Exit with appropriate status code
 
+# NOTE: When building on Apple Silicon (arm64) for AWS deployment (x86_64), use:
+#   docker build --platform linux/amd64 -f Dockerfile.worker -t worker .
+# This ensures compatibility with AWS ECS Fargate, which uses x86_64 architecture.
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
 # Install system dependencies including Node.js 20 for MCP servers
-# Also includes Chromium dependencies for Playwright headless browser
+# NOTE: Playwright browser dependencies are installed via --with-deps flag below
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -33,21 +36,6 @@ RUN apt-get update && apt-get install -y \
     jq \
     net-tools \
     findutils \
-    chromium \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libxshmfence1 \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -61,29 +49,59 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy package.json for Node.js dependencies (Claude Agent SDK, etc.)
+COPY package.json package-lock.json* ./
+
+# Install Node.js dependencies BEFORE global installs and playwright
+# This ensures package.json dependencies are available for MCP servers
+RUN npm ci --ignore-scripts || npm install --ignore-scripts
+
+# Install Claude Code CLI (required by Claude Agent SDK)
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install Playwright system dependencies as root
+# These are needed for the browser to run: libnss3, libnspr4, libdrm2, libgbm1, etc.
+RUN npx playwright install-deps chromium
+
 # Copy worker application code
 # worker_main.py - Harness-based entry point (preferred)
 # claude_code_agent.py - Legacy entry point (backward compatibility)
 COPY worker_main.py .
 COPY claude_code_agent.py .
 COPY src/ ./src/
+# prompts/ includes subdirectories (e.g., canopy/) - Docker COPY handles recursively
 COPY prompts/ ./prompts/
 COPY frontend-scaffold-template/ ./frontend-scaffold-template/
 COPY prompt_template.txt .
 COPY state_management.txt .
 
-# Install Claude Code CLI (required by Claude Agent SDK)
-RUN npm install -g @anthropic-ai/claude-code
-
-# Install Playwright for browser automation (screenshots, testing)
-RUN npx playwright install chromium
-
 # Create workspace directories
 RUN mkdir -p /app/workspace /projects
+
+# Create non-root user for Claude CLI
+# Claude Code refuses --dangerously-skip-permissions (bypassPermissions) when running as root
+# This is a security safeguard in Claude Code itself
+RUN groupadd -r worker && useradd -r -g worker -d /home/worker -m worker \
+    && chown -R worker:worker /app /projects
+
+# Set up Claude CLI config directory for non-root user
+RUN mkdir -p /home/worker/.claude && chown -R worker:worker /home/worker/.claude
+
+# Switch to non-root user
+USER worker
+
+# Install Playwright chromium browser as the worker user (matches reference implementation)
+# Browsers are installed to ~/.cache/ms-playwright by default
+# This ensures Claude SDK's Bash tool inherits the correct browser path automatically
+RUN npx playwright install chromium
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
 ENV WORKER_MODE=true
+ENV HOME=/home/worker
+# Add project's node_modules/.bin to PATH so npx uses locked playwright version
+# This prevents version mismatch: build-time browsers must match runtime playwright
+ENV PATH="/app/node_modules/.bin:$PATH"
 
 # The worker is invoked with environment variables:
 # Required:

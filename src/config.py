@@ -363,6 +363,29 @@ def apply_provider_config(config: ProjectConfig) -> None:
         os.environ[key] = value
 
 
+def apply_provider_env(provider: Provider) -> None:
+    """
+    Apply minimal provider environment variables.
+
+    This is a simplified version of apply_provider_config that only sets
+    the CLAUDE_CODE_USE_BEDROCK environment variable based on the provider.
+    Use this when you don't have a full ProjectConfig object.
+
+    Args:
+        provider: The provider to configure (ANTHROPIC or BEDROCK)
+
+    Examples:
+        >>> apply_provider_env(Provider.BEDROCK)
+        # Sets CLAUDE_CODE_USE_BEDROCK=1
+        >>> apply_provider_env(Provider.ANTHROPIC)
+        # Sets CLAUDE_CODE_USE_BEDROCK=0
+    """
+    if provider == Provider.BEDROCK:
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+    else:
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "0"
+
+
 # Port defaults
 DEFAULT_FRONTEND_PORT = 6174
 DEFAULT_BACKEND_PORT = 4001

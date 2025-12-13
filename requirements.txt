@@ -17,9 +17,9 @@ python-dotenv>=1.0.0
 # Note: Full instrumentation optional for local development
 opentelemetry-api>=1.20.0
 
-# Optional: AWS Distro for OpenTelemetry (ADOT) for trace generation
+# AWS Distro for OpenTelemetry (ADOT) for trace generation
 # Required for production ECS observability - enables X-Ray trace delivery
-# Uncomment if needed: aws-opentelemetry-distro>=0.13.0
+aws-opentelemetry-distro>=0.13.0
 
 # Documentation - architecture diagrams
 diagrams>=0.23.0

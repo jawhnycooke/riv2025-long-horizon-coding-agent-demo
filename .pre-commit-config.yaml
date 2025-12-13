@@ -8,7 +8,7 @@ repos:
     rev: 24.4.2
     hooks:
       - id: black
-        language_version: python3.11
+        language_version: python3.12
         exclude: ^(generated-app|\.venv)/
 
   # Ruff - linting (replaces flake8, isort, and more)
@@ -52,7 +52,7 @@ repos:
 
 # Configuration
 default_language_version:
-  python: python3.11
+  python: python3.12
 
 ci:
   autofix_commit_msg: |

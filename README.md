@@ -176,12 +176,10 @@ flowchart TB
             end
         end
 
-        subgraph AgentLayer["Claude Agent + MCP"]
-            subgraph PlaywrightMCP["Playwright MCP Server<br/>@anthropic/mcp-server-playwright"]
-                Screenshot["mcp__playwright__screenshot"]
-                Click["mcp__playwright__click"]
-                Fill["mcp__playwright__fill"]
-                Assert["mcp__playwright__assert_visible"]
+        subgraph AgentLayer["Claude Agent"]
+            subgraph PlaywrightCLI["Playwright CLI (via Bash)"]
+                Screenshot["npx playwright screenshot"]
+                TestCJS["node playwright-test.cjs<br/>(screenshot + console)"]
             end
 
             subgraph SDKTools["Claude SDK Tools"]
@@ -432,7 +430,7 @@ flowchart LR
 
 | Server | Package | Purpose |
 |--------|---------|---------|
-| Playwright | `@anthropic/mcp-server-playwright` | Browser automation, screenshots |
+| Playwright | `@playwright/mcp` | Browser automation, screenshots ([docs](https://github.com/microsoft/playwright-mcp)) |
 
 ## Component Reference
 
